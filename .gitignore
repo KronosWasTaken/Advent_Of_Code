@@ -1,0 +1,11 @@
+# Ignore all text files
+*.txt
+
+# Ignore executable files
+*.exe
+
+# Ignore debug database files
+*.pdb
+
+# Ignore VS Code settings
+.vscode/
