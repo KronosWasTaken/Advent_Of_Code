@@ -15,17 +15,11 @@ fn build(components: []const Component, used: u64, port: u32, strength: u32, len
     for (components, 0..) |comp, i| {
         const mask: u64 = @as(u64, 1) << @intCast(i);
         if ((used & mask) != 0) continue;
-        var next_port: u32 = undefined;
-        var can_use = false;
-        if (comp.a == port) {
-            next_port = comp.b;
-            can_use = true;
-        } else if (comp.b == port) {
-            next_port = comp.a;
-            can_use = true;
-        }
-        if (can_use) {
+        const connects_a = comp.a == port;
+        const connects_b = comp.b == port;
+        if (connects_a or connects_b) {
             found = true;
+            const next_port = if (connects_a) comp.b else comp.a;
             const new_used = used | mask;
             const new_strength = strength + comp.a + comp.b;
             const new_length = length + 1;
@@ -77,4 +71,4 @@ pub fn main() !void {
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
     std.debug.print("Part 1: {} | Part 2: {}\n", .{ result.p1, result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
-}
+}

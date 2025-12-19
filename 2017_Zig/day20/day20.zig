@@ -4,14 +4,6 @@ const Vec3 = struct {
     x: i64,
     y: i64,
     z: i64,
-    pub fn eql(self: Vec3, other: Vec3) bool {
-        return self.x == other.x and self.y == other.y and self.z == other.z;
-    }
-    pub fn hash(self: Vec3, hasher: anytype) void {
-        std.hash.autoHash(hasher, self.x);
-        std.hash.autoHash(hasher, self.y);
-        std.hash.autoHash(hasher, self.z);
-    }
 };
 const Particle = struct {
     p: Vec3,
@@ -28,7 +20,7 @@ fn parseVec3(s: []const u8) Vec3 {
     if (tokens.next()) |t| result.z = std.fmt.parseInt(i64, t, 10) catch 0;
     return result;
 }
-fn manhattan(v: Vec3) u64 {
+inline fn manhattan(v: Vec3) u64 {
     const ax: u64 = @abs(v.x);
     const ay: u64 = @abs(v.y);
     const az: u64 = @abs(v.z);
@@ -59,13 +51,19 @@ fn solve(input: []const u8) Result {
         }
     }
     const n = particles.items.len;
-    var exists = gpa.alloc(bool, n) catch unreachable;
+    const exists = gpa.alloc(bool, n) catch unreachable;
     defer gpa.free(exists);
     @memset(exists, true);
     const particles2 = gpa.alloc(Particle, n) catch unreachable;
     defer gpa.free(particles2);
     @memcpy(particles2, particles.items);
+    var positions = std.AutoHashMap(u64, u32).init(gpa);
+    defer positions.deinit();
+    var collided = std.AutoHashMap(u32, void).init(gpa);
+    defer collided.deinit();
     for (0..40) |_| {
+        positions.clearRetainingCapacity();
+        collided.clearRetainingCapacity();
         for (particles2, 0..) |*particle, i| {
             if (exists[i]) {
                 particle.v.x += particle.a.x;
@@ -76,15 +74,21 @@ fn solve(input: []const u8) Result {
                 particle.p.z += particle.v.z;
             }
         }
-        for (0..n) |i| {
+        for (particles2, 0..) |particle, i| {
             if (!exists[i]) continue;
-            for (i + 1..n) |j| {
-                if (!exists[j]) continue;
-                if (particles2[i].p.eql(particles2[j].p)) {
-                    exists[i] = false;
-                    exists[j] = false;
-                }
+            const hash = @as(u64, @bitCast(particle.p.x)) ^
+                        (@as(u64, @bitCast(particle.p.y)) << 21) ^
+                        (@as(u64, @bitCast(particle.p.z)) << 42);
+            if (positions.get(hash)) |j| {
+                collided.put(@intCast(i), {}) catch unreachable;
+                collided.put(j, {}) catch unreachable;
+            } else {
+                positions.put(hash, @intCast(i)) catch unreachable;
             }
+        }
+        var iter = collided.keyIterator();
+        while (iter.next()) |idx| {
+            exists[idx.*] = false;
         }
     }
     var p2: u32 = 0;
@@ -102,4 +106,4 @@ pub fn main() !void {
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
     std.debug.print("Part 1: {} | Part 2: {}\n", .{ result.p1, result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
-}
+}

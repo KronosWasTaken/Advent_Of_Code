@@ -1,6 +1,8 @@
 const std = @import("std");
 const Result = struct { p1: u32, p2: u32 };
 const MOD: u64 = 0x7fffffff;
+const FACTOR_A: u64 = 16807;
+const FACTOR_B: u64 = 48271;
 const BLOCK_SIZE: u32 = 50000;
 const PART_ONE: u32 = 40_000_000;
 const PART_TWO: u32 = 5_000_000;
@@ -17,9 +19,9 @@ fn modPow(base: u64, exp: u64, mod: u64) u64 {
     var e = exp;
     while (e > 0) {
         if (e & 1 == 1) {
-            result = fastMod(result * b);
+            result = fastMod(result *% b);
         }
-        b = fastMod(b * b);
+        b = fastMod(b *% b);
         e >>= 1;
     }
     return result;
@@ -46,14 +48,36 @@ fn blockWorker(data: *WorkerData) void {
     var eights: std.ArrayList(u16) = .{};
     fours.ensureTotalCapacity(gpa, BLOCK_SIZE / 4) catch unreachable;
     eights.ensureTotalCapacity(gpa, BLOCK_SIZE / 8) catch unreachable;
-    for (0..BLOCK_SIZE) |_| {
-        a = fastMod(a *% 16807);
-        b = fastMod(b *% 48271);
-        const left: u16 = @intCast(a & 0xFFFF);
-        const right: u16 = @intCast(b & 0xFFFF);
-        if (left == right) ones += 1;
-        if (left & 3 == 0) fours.append(gpa, left) catch unreachable;
-        if (right & 7 == 0) eights.append(gpa, right) catch unreachable;
+    var i: u32 = 0;
+    while (i < BLOCK_SIZE) : (i += 4) {
+        a = fastMod(a *% FACTOR_A);
+        b = fastMod(b *% FACTOR_B);
+        const left1: u16 = @truncate(a);
+        const right1: u16 = @truncate(b);
+        ones += @intFromBool(left1 == right1);
+        if ((left1 & 3) == 0) fours.append(gpa, left1) catch unreachable;
+        if ((right1 & 7) == 0) eights.append(gpa, right1) catch unreachable;
+        a = fastMod(a *% FACTOR_A);
+        b = fastMod(b *% FACTOR_B);
+        const left2: u16 = @truncate(a);
+        const right2: u16 = @truncate(b);
+        ones += @intFromBool(left2 == right2);
+        if ((left2 & 3) == 0) fours.append(gpa, left2) catch unreachable;
+        if ((right2 & 7) == 0) eights.append(gpa, right2) catch unreachable;
+        a = fastMod(a *% FACTOR_A);
+        b = fastMod(b *% FACTOR_B);
+        const left3: u16 = @truncate(a);
+        const right3: u16 = @truncate(b);
+        ones += @intFromBool(left3 == right3);
+        if ((left3 & 3) == 0) fours.append(gpa, left3) catch unreachable;
+        if ((right3 & 7) == 0) eights.append(gpa, right3) catch unreachable;
+        a = fastMod(a *% FACTOR_A);
+        b = fastMod(b *% FACTOR_B);
+        const left4: u16 = @truncate(a);
+        const right4: u16 = @truncate(b);
+        ones += @intFromBool(left4 == right4);
+        if ((left4 & 3) == 0) fours.append(gpa, left4) catch unreachable;
+        if ((right4 & 7) == 0) eights.append(gpa, right4) catch unreachable;
     }
     data.result = Block{
         .start = data.block_idx * BLOCK_SIZE,
@@ -80,7 +104,7 @@ fn solve(input: []const u8) Result {
     const start_b = std.fmt.parseInt(u64, tokens_b.next() orelse "0", 10) catch 0;
     const gpa = std.heap.page_allocator;
     const num_blocks = PART_ONE / BLOCK_SIZE;
-    const num_threads = @min(8, std.Thread.getCpuCount() catch 4); 
+    const num_threads = @min(8, std.Thread.getCpuCount() catch 4);
     var all_fours: std.ArrayList(u16) = .{};
     defer all_fours.deinit(gpa);
     var all_eights: std.ArrayList(u16) = .{};
@@ -94,11 +118,11 @@ fn solve(input: []const u8) Result {
         for (0..batch_size) |t| {
             const idx = block_idx + @as(u32, @intCast(t));
             const offset: u64 = idx * BLOCK_SIZE;
-            const factor_a = modPow(16807, offset, MOD);
-            const factor_b = modPow(48271, offset, MOD);
+            const factor_a = modPow(FACTOR_A, offset, MOD);
+            const factor_b = modPow(FACTOR_B, offset, MOD);
             worker_data[t] = .{
-                .start_a = fastMod(start_a * factor_a),
-                .start_b = fastMod(start_b * factor_b),
+                .start_a = fastMod(start_a *% factor_a),
+                .start_b = fastMod(start_b *% factor_b),
                 .block_idx = idx,
                 .allocator = gpa,
                 .result = null,
@@ -120,7 +144,7 @@ fn solve(input: []const u8) Result {
     var p2: u32 = 0;
     const limit = @min(PART_TWO, @min(all_fours.items.len, all_eights.items.len));
     for (0..limit) |i| {
-        if (all_fours.items[i] == all_eights.items[i]) p2 += 1;
+        p2 += @intFromBool(all_fours.items[i] == all_eights.items[i]);
     }
     return .{ .p1 = p1, .p2 = p2 };
 }
@@ -133,4 +157,4 @@ pub fn main() !void {
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
     std.debug.print("Part 1: {} | Part 2: {}\n", .{ result.p1, result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
-}
+}

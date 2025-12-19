@@ -72,4 +72,4 @@ pub fn main() !void {
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
     std.debug.print("Part 1: {s} | Part 2: {}\n", .{ result.p1[0..result.p1_len], result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
-}
+}

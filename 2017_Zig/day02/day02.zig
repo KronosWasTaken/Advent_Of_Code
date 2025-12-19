@@ -43,4 +43,4 @@ pub fn main() !void {
     std.debug.print("Part 1: {}\n", .{result.p1});
     std.debug.print("Part 2: {}\n", .{result.p2});
     std.debug.print("Time: {d:.2} microseconds\n", .{avg_us});
-}
+}
