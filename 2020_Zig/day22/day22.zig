@@ -6,274 +6,206 @@ const Result = struct {
 };
 
 const Answer = usize;
-const MAX_STACK = 1000;
 const Card = u8;
+const DeckCapacity = 64;
 
 const Input = struct {
-    allocator: std.mem.Allocator,
-    cards1: []Card,
-    cards2: []Card,
+    deck1: Deck,
+    deck2: Deck,
+};
 
-    fn init(allocator: std.mem.Allocator, cards1: []Card, cards2: []Card) Input {
-        return .{ .allocator = allocator, .cards1 = cards1, .cards2 = cards2 };
+const Winner = union(enum) {
+    player1: Deck,
+    player2: Deck,
+};
+
+const Cache = std.ArrayListUnmanaged(std.AutoHashMap(u128, void));
+
+const Deck = struct {
+    sum: usize = 0,
+    score: usize = 0,
+    start: usize = 0,
+    end: usize = 0,
+    cards: [DeckCapacity]Card = [_]Card{0} ** DeckCapacity,
+
+    fn new() Deck {
+        return .{};
     }
 
-    fn deinit(self: *Input) void {
-        self.allocator.free(self.cards1);
-        self.allocator.free(self.cards2);
+    fn push_back(self: *Deck, card: usize) void {
+        self.cards[self.end % DeckCapacity] = @intCast(card);
+        self.sum += card;
+        self.score += self.sum;
+        self.end += 1;
+    }
+
+    fn pop_front(self: *Deck) usize {
+        const card = @as(usize, self.cards[self.start % DeckCapacity]);
+        self.sum -= card;
+        self.score -= self.size() * card;
+        self.start += 1;
+        return card;
+    }
+
+    fn size(self: Deck) usize {
+        return self.end - self.start;
+    }
+
+    fn non_empty(self: Deck) bool {
+        return self.end > self.start;
+    }
+
+    fn max(self: Deck) Card {
+        var m: Card = 0;
+        var i: usize = self.start;
+        while (i < self.end) : (i += 1) {
+            const value = self.cards[i % DeckCapacity];
+            if (value > m) m = value;
+        }
+        return m;
+    }
+
+    fn copy(self: Deck, amount: usize) Deck {
+        var deck_copy = Deck.new();
+        deck_copy.end = amount;
+        var i: usize = 0;
+        while (i < amount) : (i += 1) {
+            const card = self.cards[(self.start + i) % DeckCapacity];
+            deck_copy.cards[i] = card;
+            deck_copy.sum += card;
+            deck_copy.score += deck_copy.sum;
+        }
+        return deck_copy;
     }
 };
 
-const Player = enum {
-    one,
-    two,
-};
+fn parseInput(input: []const u8) !Input {
+    var deck1 = Deck.new();
+    var deck2 = Deck.new();
+    var player: usize = 1;
 
-fn Game(comptime MAX: usize) type {
-    return struct {
-        allocator: std.mem.Allocator,
-        my_deck: Deck(MAX),
-        your_deck: Deck(MAX),
-
-        const Mode = enum {
-            standard,
-            recursive,
-        };
-
-        const Self = @This();
-
-        fn new(input: Input) Self {
-            return .{
-                .allocator = input.allocator,
-                .my_deck = Deck(MAX).new(input.cards1),
-                .your_deck = Deck(MAX).new(input.cards2),
-            };
-        }
-
-        fn newWithDecks(allocator: std.mem.Allocator, my_deck: Deck(MAX), your_deck: Deck(MAX)) Self {
-            return .{ .allocator = allocator, .my_deck = my_deck, .your_deck = your_deck };
-        }
-
-        fn state(self: Self) []u8 {
-            const deck1 = self.my_deck.state(self.allocator);
-            defer self.allocator.free(deck1);
-
-            const deck2 = self.your_deck.state(self.allocator);
-            defer self.allocator.free(deck2);
-
-            var states: [2][]u8 = [_][]u8{ deck1, deck2 };
-            return std.mem.join(self.allocator, "   ", &states) catch unreachable;
-        }
-
-        fn play(self: *Self, mode: Mode) Player {
-            var visited = std.StringHashMap(void).init(self.allocator);
-            defer {
-                var iterator = visited.iterator();
-                while (iterator.next()) |entry| {
-                    self.allocator.free(entry.key_ptr.*);
-                }
-                visited.deinit();
-            }
-
-            var game_winner: Player = undefined;
-
-            while (true) {
-                if (self.my_deck.depth() == 0) {
-                    game_winner = .two;
-                    break;
-                }
-                if (self.your_deck.depth() == 0) {
-                    game_winner = .one;
-                    break;
-                }
-
-                if (mode == .recursive) {
-                    const current = self.state();
-                    if (visited.contains(current)) {
-                        defer self.allocator.free(current);
-                        game_winner = .one;
-                        break;
-                    }
-                    visited.put(current, {}) catch unreachable;
-                }
-
-                const card1 = self.my_deck.draw().?;
-                const card2 = self.your_deck.draw().?;
-
-                var winner: Player = undefined;
-                if (mode == .recursive and card1 <= self.my_deck.depth() and card2 <= self.your_deck.depth()) {
-                    var my_deck_copy = self.my_deck.copy(card1);
-                    var your_deck_copy = self.your_deck.copy(card2);
-
-                    if (my_deck_copy.max() > your_deck_copy.max()) {
-                        winner = .one;
-                    } else {
-                        var game = Game(MAX).newWithDecks(self.allocator, my_deck_copy, your_deck_copy);
-                        winner = game.play(mode);
-                    }
-                } else {
-                    winner = if (card1 > card2) .one else .two;
-                }
-
-                self.settleRound(winner, card1, card2);
-            }
-
-            return game_winner;
-        }
-
-        fn settleRound(self: *Self, winner: Player, card1: Card, card2: Card) void {
-            if (winner == .one) {
-                self.my_deck.push(card1);
-                self.my_deck.push(card2);
-            } else {
-                self.your_deck.push(card2);
-                self.your_deck.push(card1);
-            }
-        }
-
-        fn score(self: Self) usize {
-            const deck = if (self.my_deck.depth() == 0) self.your_deck else self.my_deck;
-            return deck.score();
-        }
-    };
-}
-
-fn parseInput(allocator: std.mem.Allocator, input: []const u8) !Input {
-    var clean = std.ArrayListUnmanaged(u8){};
-    defer clean.deinit(allocator);
-    for (input) |ch| {
-        if (ch != '\r') try clean.append(allocator, ch);
-    }
-
-    var cards1 = std.ArrayListUnmanaged(Card){};
-    errdefer cards1.deinit(allocator);
-
-    var cards2 = std.ArrayListUnmanaged(Card){};
-    errdefer cards2.deinit(allocator);
-
-    var player = Player.one;
-    var lines = std.mem.splitScalar(u8, clean.items, '\n');
-
-    while (lines.next()) |line| {
+    var lines = std.mem.splitScalar(u8, input, '\n');
+    while (lines.next()) |raw_line| {
+        const line = std.mem.trimRight(u8, raw_line, "\r");
         if (line.len == 0) {
-            player = .two;
+            player = 2;
             continue;
         }
-        if (std.mem.startsWith(u8, line, "Player")) {
-            if (std.mem.indexOfScalar(u8, line, '2') != null) {
-                player = .two;
-            } else {
-                player = .one;
-            }
-            continue;
-        }
-        const number = try std.fmt.parseInt(Card, line, 10);
-        switch (player) {
-            .one => try cards1.append(allocator, number),
-            .two => try cards2.append(allocator, number),
+        if (std.mem.startsWith(u8, line, "Player")) continue;
+
+        const card = try std.fmt.parseInt(Card, line, 10);
+        if (player == 1) {
+            deck1.push_back(card);
+        } else {
+            deck2.push_back(card);
         }
     }
 
-    return Input.init(
-        allocator,
-        try cards1.toOwnedSlice(allocator),
-        try cards2.toOwnedSlice(allocator),
-    );
-}
-
-fn Deck(comptime MAX: usize) type {
-    return struct {
-        cards: [MAX]Card = undefined,
-        top: usize = 0,
-        bottom: usize = 0,
-
-        const Self = @This();
-
-        fn new(cards: []const Card) Self {
-            var deck = Self{};
-            deck.add(cards);
-            return deck;
-        }
-
-        fn add(self: *Self, cards: []const Card) void {
-            for (cards) |card| {
-                self.push(card);
-            }
-        }
-
-        fn copy(self: Self, up_to: Card) Self {
-            const slice = self.cards[self.top .. self.top + up_to];
-            return Self.new(slice);
-        }
-
-        fn max(self: Self) Card {
-            var m: Card = 0;
-            var i: usize = 0;
-            const deck_depth = self.depth();
-            while (i < deck_depth) : (i += 1) {
-                const v = self.cards[self.top + i];
-                if (v > m) m = v;
-            }
-            return m;
-        }
-
-        fn state(self: Self, allocator: std.mem.Allocator) []u8 {
-            const cards = self.cards[self.top..self.bottom];
-            const string: [1][]const u8 = [_][]const u8{cards};
-            return std.mem.join(allocator, " ", &string) catch unreachable;
-        }
-
-        fn depth(self: Self) usize {
-            return self.bottom - self.top;
-        }
-
-        fn draw(self: *Self) ?Card {
-            if (self.depth() == 0) return null;
-            const card = self.cards[self.top];
-            self.top += 1;
-            return card;
-        }
-
-        fn push(self: *Self, item: Card) void {
-            self.cards[self.bottom] = item;
-            self.bottom += 1;
-        }
-
-        fn score(self: Self) usize {
-            var s: usize = 0;
-            var k: usize = 1;
-            const deck_depth = self.depth();
-            while (k <= deck_depth) : (k += 1) {
-                const card = self.cards[self.bottom - k];
-                s += k * card;
-            }
-            return s;
-        }
-    };
+    return .{ .deck1 = deck1, .deck2 = deck2 };
 }
 
 fn part1(input: Input) Answer {
-    var game = Game(MAX_STACK).new(input);
-    _ = game.play(.standard);
-    return game.score();
+    var deck1 = input.deck1;
+    var deck2 = input.deck2;
+
+    while (deck1.non_empty() and deck2.non_empty()) {
+        const card1 = deck1.pop_front();
+        const card2 = deck2.pop_front();
+
+        if (card1 > card2) {
+            deck1.push_back(card1);
+            deck1.push_back(card2);
+        } else {
+            deck2.push_back(card2);
+            deck2.push_back(card1);
+        }
+    }
+
+    return if (deck1.non_empty()) deck1.score else deck2.score;
 }
 
-fn part2(input: Input) Answer {
-    var game = Game(MAX_STACK * 10).new(input);
-    _ = game.play(.recursive);
-    return game.score();
+fn makeKey(score1: usize, score2: usize) u128 {
+    const shift: u7 = @intCast(@bitSizeOf(usize));
+    return (@as(u128, score1) << shift) | @as(u128, score2);
+}
+
+fn combat(deck1: Deck, deck2: Deck, cache: *Cache, allocator: std.mem.Allocator, depth: usize) Winner {
+    var my_deck = deck1;
+    var your_deck = deck2;
+
+    if (depth > 0 and my_deck.max() > your_deck.max()) {
+        return .{ .player1 = my_deck };
+    }
+
+    if (cache.items.len == depth) {
+        var map = std.AutoHashMap(u128, void).init(allocator);
+        map.ensureTotalCapacity(1_000) catch unreachable;
+        cache.append(allocator, map) catch unreachable;
+    } else {
+        cache.items[depth].clearRetainingCapacity();
+    }
+
+    while (my_deck.non_empty() and your_deck.non_empty()) {
+        const key = makeKey(my_deck.score, your_deck.score);
+        const entry = cache.items[depth].getOrPut(key) catch unreachable;
+        if (entry.found_existing) {
+            return .{ .player1 = my_deck };
+        }
+        entry.value_ptr.* = {};
+
+        const card1 = my_deck.pop_front();
+        const card2 = your_deck.pop_front();
+
+        if (my_deck.size() < card1 or your_deck.size() < card2) {
+            if (card1 > card2) {
+                my_deck.push_back(card1);
+                my_deck.push_back(card2);
+            } else {
+                your_deck.push_back(card2);
+                your_deck.push_back(card1);
+            }
+        } else {
+            const sub_winner = combat(my_deck.copy(card1), your_deck.copy(card2), cache, allocator, depth + 1);
+            switch (sub_winner) {
+                .player1 => {
+                    my_deck.push_back(card1);
+                    my_deck.push_back(card2);
+                },
+                .player2 => {
+                    your_deck.push_back(card2);
+                    your_deck.push_back(card1);
+                },
+            }
+        }
+    }
+
+    return if (my_deck.non_empty()) .{ .player1 = my_deck } else .{ .player2 = your_deck };
+}
+
+fn part2(input: Input, allocator: std.mem.Allocator) Answer {
+    var cache = Cache{};
+    defer {
+        for (cache.items) |*map| {
+            map.deinit();
+        }
+        cache.deinit(allocator);
+    }
+
+    const result = combat(input.deck1, input.deck2, &cache, allocator, 0);
+    return switch (result) {
+        .player1 => |deck| deck.score,
+        .player2 => |deck| deck.score,
+    };
 }
 
 fn solve(input_data: []const u8) !Result {
-    var alloc = std.heap.GeneralPurposeAllocator(.{}){};
-    var arena = std.heap.ArenaAllocator.init(alloc.allocator());
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
 
-    var input = try parseInput(arena.allocator(), input_data);
-    defer input.deinit();
-
+    const input = try parseInput(input_data);
     const p1 = part1(input);
-    const p2 = part2(input);
+    const p2 = part2(input, arena.allocator());
     return .{ .p1 = p1, .p2 = p2 };
 }
 
