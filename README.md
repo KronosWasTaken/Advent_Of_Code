@@ -14,6 +14,7 @@ The solutions are organized by year, primarily utilizing **Zig** for high-perfor
 | 2018 | Zig | `2018_Zig/` |
 | 2019 | Zig (Days 1–25, excluding 7 & 17) / JavaScript (Days 7 & 17) | `2019_Zig_Js/` |
 | 2020 | Zig | `2020_Zig/` |
+| 2021 | Zig | `2021_Zig/` |
 
 ---
 
@@ -29,7 +30,8 @@ The following table summarizes total execution times for all 25 days of each yea
 | 2018 | 93.17 ms | [`2018_Zig/benchmark.md`](2018_Zig/benchmark.md) |
 | 2019 | 170.14 ms | [`2019_Zig_Js/benchmark.md`](2019_Zig_Js/benchmark.md) |
 | 2020 | 438.41 ms | [`2020_Zig/benchmark.md`](2020_Zig/benchmark.md) |
-| **Total** | **1,647.35 ms (1.65 s)** | |
+| 2021 | 17.52 ms | [`2021_Zig/benchmark.md`](2021_Zig/benchmark.md) |
+| **Total** | **1,664.87 ms (1.66 s)** | |
 
 ---
 
