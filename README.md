@@ -24,12 +24,12 @@ The following table summarizes total execution times for all 25 days of each yea
 | Year | Execution Time (Total) | Benchmark Documentation |
 | :--- | :--- | :--- |
 | 2015 | 65.31 ms | [`2015_Zig/benchmark.md`](2015_Zig/benchmark.md) |
-| 2016 | 970.53 ms | [`2016_Zig/benchmark.md`](2016_Zig/benchmark.md) |
+| 2016 | 646.36 ms | [`2016_Zig/benchmark.md`](2016_Zig/benchmark.md) |
 | 2017 | 233.96 ms | [`2017_Zig/benchmark.md`](2017_Zig/benchmark.md) |
 | 2018 | 93.17 ms | [`2018_Zig/benchmark.md`](2018_Zig/benchmark.md) |
 | 2019 | 170.14 ms | [`2019_Zig_Js/benchmark.md`](2019_Zig_Js/benchmark.md) |
 | 2020 | 438.41 ms | [`2020_Zig/benchmark.md`](2020_Zig/benchmark.md) |
-| **Total** | **1,971.52 ms (1.97 s)** | |
+| **Total** | **1,647.35 ms (1.65 s)** | |
 
 ---
 
