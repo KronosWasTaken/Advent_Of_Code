@@ -49,7 +49,7 @@ Benchmarks for 2015-2025 were collected on the following system:
 
 - OS: Windows 25H2 (Build 26200.7840)
 - CPU: AMD Ryzen 5 6600H with Radeon Graphics
-- GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU
+- GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM)
 - RAM: 16 GB
 - Storage: Kingston SNV2S1000G SSD (1 TB), JMicron PCIe SSD (512 GB)
 - Zig: 0.15.2
