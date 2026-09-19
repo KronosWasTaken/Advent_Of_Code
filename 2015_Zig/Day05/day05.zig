@@ -55,14 +55,9 @@ fn solve(data: []const u8) [2]u32 {
 }
 pub fn main() !void {
     const data = @embedFile("input.txt");
-    var result = solve(data);
-    for (0..100) |_| result = solve(data);
-    const iters: u32 = 10000;
     var timer = try std.time.Timer.start();
-    const start = timer.read();
-    for (0..iters) |_| result = solve(data);
-    const elapsed_us = @as(f64, @floatFromInt(timer.read() - start)) / 1000.0;
+    const result = solve(data);
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
     std.debug.print("Part 1: {} | Part 2: {}\n", .{ result[0], result[1] });
-    std.debug.print("Total: {d:.2} microseconds\n", .{elapsed_us});
-    std.debug.print("Average: {d:.4} microseconds\n", .{elapsed_us / @as(f64, @floatFromInt(iters))});
+    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }

@@ -55,16 +55,10 @@ fn solve(input: []const u8) Result {
 }
 pub fn main() !void {
     const input = "361527";
-    var total: u64 = 0;
-    const iterations = 1000;
-    var result: Result = undefined;
-    for (0..iterations) |_| {
-        var timer = try std.time.Timer.start();
-        result = solve(input);
-        total += timer.read();
-    }
-    const avg_ns = total / iterations;
-    const avg_us = @as(f64, @floatFromInt(avg_ns)) / 1000.0;
+    var timer = try std.time.Timer.start();
+    const result = solve(input);
+    const elapsed_ns = timer.read();
+    const avg_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
     std.debug.print("Part 1: {}\n", .{result.p1});
     std.debug.print("Part 2: {}\n", .{result.p2});
     std.debug.print("Time: {d:.2} microseconds\n", .{avg_us});

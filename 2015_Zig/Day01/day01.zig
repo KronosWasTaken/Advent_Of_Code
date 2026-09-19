@@ -24,14 +24,9 @@ inline fn solve(input: []const u8) struct { p1: i32, p2: usize } {
 }
 pub fn main() !void {
     const input = @embedFile("input.txt");
-    var result = solve(input);
-    for (0..100) |_| result = solve(input);
-    const iters: u32 = 100000;
     var timer = try std.time.Timer.start();
-    const start = timer.read();
-    for (0..iters) |_| result = solve(input);
-    const elapsed_us = @as(f64, @floatFromInt(timer.read() - start)) / 1000.0;
+    const result = solve(input);
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
     std.debug.print("Part 1: {} | Part 2: {}\n", .{ result.p1, result.p2 });
-    std.debug.print("Total: {d:.2} microseconds\n", .{elapsed_us});
-    std.debug.print("Average: {d:.4} microseconds\n", .{elapsed_us / @as(f64, @floatFromInt(iters))});
+    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }

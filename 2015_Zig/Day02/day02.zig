@@ -43,23 +43,13 @@ fn solve(data: []const u8) [2]u32 {
 
 pub fn main() !void {
     const data = @embedFile("input.txt");
-    
-    _ = solve(data);
-    
-    const iterations = 10000;
+
     var timer = try std.time.Timer.start();
-    const start = timer.read();
-    
-    var result: [2]u32 = undefined;
-    for (0..iterations) |_| {
-        result = solve(data);
-    }
-    
-    const end = timer.read();
-    const elapsed_ns = end - start;
-    const avg_us = @as(f64, @floatFromInt(elapsed_ns)) / @as(f64, @floatFromInt(iterations)) / 1000.0;
-    
+    const result = solve(data);
+    const elapsed_ns = timer.read();
+    const avg_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+
     std.debug.print("Part 1: {}\n", .{result[0]});
     std.debug.print("Part 2: {}\n", .{result[1]});
-    std.debug.print("Time: {d:.3} microseconds (avg of {} iterations)\n", .{avg_us, iterations});
+    std.debug.print("Time: {d:.3} microseconds\n", .{avg_us});
 }

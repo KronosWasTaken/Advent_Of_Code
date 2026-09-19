@@ -17,14 +17,7 @@ fn solve(input: []const u8) Result {
 
     var i: usize = 0;
     var turn: usize = 0;
-    while (i + 1 < input.len) {
-        if (input[i] == '\r' and input[i + 1] == '\n') {
-            i += 2;
-            if (i + 1 < input.len and input[i] == '\r' and input[i + 1] == '\n') {
-                i += 2;
-            }
-            break;
-        }
+    while (i < input.len and turn < 100) {
         if (input[i] < '0' or input[i] > '9') {
             i += 1;
             continue;
