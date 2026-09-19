@@ -50,23 +50,17 @@ fn parse(input: []const u8, allocator: std.mem.Allocator) Input {
     return .{ .algo = algo, .grid = grid, .width = width, .height = height };
 }
 
-fn fromRow(pixels: []u8, width: i32, x: i32, y: i32, left_edge: u8, right_edge: u8) Vec {
-    var row_vals: [LaneWidth]u16 = undefined;
-    var left_vals: [LaneWidth]u16 = undefined;
-    var right_vals: [LaneWidth]u16 = undefined;
-    const base = @as(usize, @intCast(y * width + x));
-    var i: usize = 0;
-    while (i < LaneWidth) : (i += 1) {
-        row_vals[i] = pixels[base + i];
-        left_vals[i] = if (i == 0) left_edge else row_vals[i - 1];
-        right_vals[i] = if (i + 1 == LaneWidth) right_edge else row_vals[i + 1];
+fn fillRowCodes(pixels: []const u8, out_w: i32, y: i32, lo: i32, hi: i32, valid_lo: i32, valid_hi: i32, default: u8, dst: []u16) void {
+    const y_valid = y >= valid_lo and y < valid_hi;
+    var x: i32 = lo;
+    while (x < hi) : (x += 1) {
+        const self_val: u16 = if (!y_valid or x < valid_lo or x >= valid_hi) default else pixels[@as(usize, @intCast(y * out_w + x))];
+        const left_x = x - 1;
+        const left_val: u16 = if (!y_valid or left_x < valid_lo or left_x >= valid_hi) default else pixels[@as(usize, @intCast(y * out_w + left_x))];
+        const right_x = x + 1;
+        const right_val: u16 = if (!y_valid or right_x < valid_lo or right_x >= valid_hi) default else pixels[@as(usize, @intCast(y * out_w + right_x))];
+        dst[@as(usize, @intCast(x - lo))] = (left_val << 2) | (self_val << 1) | right_val;
     }
-    const row = @as(Vec, row_vals);
-    const left = @as(Vec, left_vals);
-    const right = @as(Vec, right_vals);
-    const two: Vec = @splat(2);
-    const one: Vec = @splat(1);
-    return (left << two) | (row << one) | right;
 }
 
 fn enhanceSimd(input: Input, steps: i32, allocator: std.mem.Allocator) u32 {
@@ -97,27 +91,45 @@ fn enhanceSimd(input: Input, steps: i32, allocator: std.mem.Allocator) u32 {
     var end: i32 = extra + input.width + 1;
 
     const left_mask: Vec = @splat(0b110);
-    const one_mask: Vec = @splat(1);
+    const mid_mask: Vec = @splat(3);
+
+    var row_above = allocator.alloc(u16, @as(usize, @intCast(out_w))) catch unreachable;
+    var row_mid = allocator.alloc(u16, @as(usize, @intCast(out_w))) catch unreachable;
+    var row_below = allocator.alloc(u16, @as(usize, @intCast(out_w))) catch unreachable;
+    defer allocator.free(row_above);
+    defer allocator.free(row_mid);
+    defer allocator.free(row_below);
 
     var step: i32 = 0;
     while (step < steps) : (step += 1) {
-        var row: i32 = start - 1;
-        while (row < end + 1) : (row += 1) {
-            const edge: Vec = if (default == 0) @splat(0) else @splat(0b111);
-            var above = edge;
-            var mid = edge;
+        const lo = start - 1;
+        const hi = end;
+        const valid_lo = lo + 1;
+        const valid_hi = hi - 1;
 
-            var x: i32 = start - 1;
-            while (x < end) : (x += LaneWidth) {
-                const below = if (row < end - 1) fromRow(pixels, out_w, x, row + 1, default, default) else edge;
-                const indices = (above << left_mask) | (mid << one_mask) | below;
-                above = mid;
-                mid = below;
+        fillRowCodes(pixels, out_w, lo - 1, lo, hi, valid_lo, valid_hi, default, row_mid);
+        fillRowCodes(pixels, out_w, lo, lo, hi, valid_lo, valid_hi, default, row_below);
+
+        var row: i32 = lo;
+        while (row < hi) : (row += 1) {
+            const tmp = row_above;
+            row_above = row_mid;
+            row_mid = row_below;
+            row_below = tmp;
+            fillRowCodes(pixels, out_w, row + 1, lo, hi, valid_lo, valid_hi, default, row_below);
+
+            var x: i32 = lo;
+            while (x < hi) : (x += LaneWidth) {
+                const off = @as(usize, @intCast(x - lo));
+                const above: Vec = row_above[off..][0..LaneWidth].*;
+                const mid: Vec = row_mid[off..][0..LaneWidth].*;
+                const below: Vec = row_below[off..][0..LaneWidth].*;
+                const indices = (above << left_mask) | (mid << mid_mask) | below;
 
                 const base = @as(usize, @intCast(out_w * row + x));
                 const idx_array = @as([LaneWidth]u16, indices);
                 var i: usize = 0;
-                while (i < LaneWidth) : (i += 1) {
+                while (i < LaneWidth and x + @as(i32, @intCast(i)) < hi) : (i += 1) {
                     next[base + i] = input.algo[idx_array[i]];
                 }
             }
