@@ -36,7 +36,7 @@ inline fn rotateLeftVec(x: Vec, n: u32) Vec {
     return (x << shift) | (x >> inv_shift);
 }
 
-inline fn md5TransformVec(M: [16]Vec) [4]Vec {
+inline fn md5TransformVec(M: [16]Vec) Vec {
     var a: Vec = @splat(0x67452301);
     var b: Vec = @splat(0xefcdab89);
     var c: Vec = @splat(0x98badcfe);
@@ -68,12 +68,7 @@ inline fn md5TransformVec(M: [16]Vec) [4]Vec {
         b = b +% rotateLeftVec(F, S[round]);
     }
 
-    return .{
-        a +% @as(Vec, @splat(0x67452301)),
-        b +% @as(Vec, @splat(0xefcdab89)),
-        c +% @as(Vec, @splat(0x98badcfe)),
-        d +% @as(Vec, @splat(0x10325476)),
-    };
+    return a +% @as(Vec, @splat(0x67452301));
 }
 
 inline fn formatInt(buf: []u8, n: u32) usize {
@@ -113,22 +108,22 @@ fn workerThread(shared: *Shared) void {
         if (shared.found_p1.load(.acquire) and shared.found_p2.load(.acquire)) return;
 
         const chunk_start = shared.iter.fetchAdd(1000, .monotonic);
-        
+
         if (chunk_start < 1000) {
-             var hash_out: [16]u8 = undefined;
-             for (0..1000) |i| {
-                 const n = chunk_start + @as(u32, @intCast(i));
-                 if (n == 0) continue;
-                 const len = KEY.len + formatInt(buf[KEY.len..], n);
-                 
-                 std.crypto.hash.Md5.hash(buf[0..len], &hash_out, .{});
-                 checkResult(n, &hash_out, shared);
-             }
-             continue;
+            var hash_out: [16]u8 = undefined;
+            for (0..1000) |i| {
+                const n = chunk_start + @as(u32, @intCast(i));
+                if (n == 0) continue;
+                const len = KEY.len + formatInt(buf[KEY.len..], n);
+
+                std.crypto.hash.Md5.hash(buf[0..len], &hash_out, .{});
+                checkResult(n, &hash_out, shared);
+            }
+            continue;
         }
 
         const base_len = KEY.len + formatInt(buf[KEY.len..], chunk_start);
-        
+
         var buffers: [SIMD_WIDTH][64]u8 = undefined;
         for (0..SIMD_WIDTH) |i| {
             @memcpy(&buffers[i], &buf);
@@ -136,8 +131,8 @@ fn workerThread(shared: *Shared) void {
 
         for (0..SIMD_WIDTH) |i| {
             buffers[i][base_len] = 0x80;
-            @memset(buffers[i][base_len+1..56], 0);
-            
+            @memset(buffers[i][base_len + 1 .. 56], 0);
+
             const bit_len = base_len * 8;
             buffers[i][56] = @intCast(bit_len & 0xFF);
             buffers[i][57] = @intCast((bit_len >> 8) & 0xFF);
@@ -146,54 +141,65 @@ fn workerThread(shared: *Shared) void {
             @memset(buffers[i][60..], 0);
         }
 
+        var M: [16]Vec = undefined;
+        inline for (0..16) |j| {
+            var lane_vals: [SIMD_WIDTH]u32 = undefined;
+            inline for (0..SIMD_WIDTH) |i| {
+                lane_vals[i] = std.mem.readInt(u32, @ptrCast(&buffers[i][j * 4]), .little);
+            }
+            M[j] = lane_vals;
+        }
+
+        const w1 = (base_len - 3) / 4;
+        const w2 = (base_len - 1) / 4;
+
         var offset: u32 = 0;
         while (offset < 1000) : (offset += SIMD_WIDTH) {
             inline for (0..SIMD_WIDTH) |i| {
                 const curr_offset = offset + @as(u32, i);
-                
+
                 buffers[i][base_len - 3] = '0' + @as(u8, @intCast(curr_offset / 100));
                 buffers[i][base_len - 2] = '0' + @as(u8, @intCast((curr_offset / 10) % 10));
                 buffers[i][base_len - 1] = '0' + @as(u8, @intCast(curr_offset % 10));
             }
 
-            var M: [16]Vec = undefined;
-            inline for (0..16) |j| {
-                var lane_vals: [SIMD_WIDTH]u32 = undefined;
+            inline for (0..SIMD_WIDTH) |i| {
+                M[w1][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w1 * 4]), .little);
+            }
+            if (w1 != w2) {
                 inline for (0..SIMD_WIDTH) |i| {
-                    lane_vals[i] = std.mem.readInt(u32, @ptrCast(&buffers[i][j*4]), .little);
+                    M[w2][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w2 * 4]), .little);
                 }
-                M[j] = lane_vals;
             }
 
-            const res = md5TransformVec(M);
-            const a = res[0];
+            const a = md5TransformVec(M);
 
             if (!shared.found_p1.load(.acquire)) {
-                 const mask = @as(Vec, @splat(0x00F0FFFF));
-                 const check = (a & mask) == @as(Vec, @splat(0));
-                 if (@reduce(.Or, check)) {
-                     inline for (0..SIMD_WIDTH) |i| {
-                         if (check[i]) {
-                             const n = chunk_start + offset + @as(u32, i);
-                             _ = shared.result_p1.fetchMin(n, .monotonic);
-                             shared.found_p1.store(true, .release);
-                         }
-                     }
-                 }
+                const mask = @as(Vec, @splat(0x00F0FFFF));
+                const check = (a & mask) == @as(Vec, @splat(0));
+                if (@reduce(.Or, check)) {
+                    inline for (0..SIMD_WIDTH) |i| {
+                        if (check[i]) {
+                            const n = chunk_start + offset + @as(u32, i);
+                            _ = shared.result_p1.fetchMin(n, .monotonic);
+                            shared.found_p1.store(true, .release);
+                        }
+                    }
+                }
             }
-            
+
             if (!shared.found_p2.load(.acquire)) {
-                 const mask = @as(Vec, @splat(0x00FFFFFF));
-                 const check = (a & mask) == @as(Vec, @splat(0));
-                 if (@reduce(.Or, check)) {
-                     inline for (0..SIMD_WIDTH) |i| {
-                         if (check[i]) {
-                             const n = chunk_start + offset + @as(u32, i);
-                             _ = shared.result_p2.fetchMin(n, .monotonic);
-                             shared.found_p2.store(true, .release);
-                         }
-                     }
-                 }
+                const mask = @as(Vec, @splat(0x00FFFFFF));
+                const check = (a & mask) == @as(Vec, @splat(0));
+                if (@reduce(.Or, check)) {
+                    inline for (0..SIMD_WIDTH) |i| {
+                        if (check[i]) {
+                            const n = chunk_start + offset + @as(u32, i);
+                            _ = shared.result_p2.fetchMin(n, .monotonic);
+                            shared.found_p2.store(true, .release);
+                        }
+                    }
+                }
             }
         }
     }
@@ -211,48 +217,32 @@ fn checkResult(n: u32, hash: *const [16]u8, shared: *Shared) void {
 }
 
 pub fn main() !void {
-    var shared_warmup = Shared{
+    var shared = Shared{
         .iter = std.atomic.Value(u32).init(0),
         .result_p1 = std.atomic.Value(u32).init(std.math.maxInt(u32)),
         .result_p2 = std.atomic.Value(u32).init(std.math.maxInt(u32)),
         .found_p1 = std.atomic.Value(bool).init(false),
         .found_p2 = std.atomic.Value(bool).init(false),
     };
-    try run_solve(&shared_warmup);
-    
-    std.debug.print("Part 1: {}\n", .{shared_warmup.result_p1.load(.monotonic)});
-    std.debug.print("Part 2: {}\n", .{shared_warmup.result_p2.load(.monotonic)});
 
-    const iters = 10;
     var timer = try std.time.Timer.start();
-    const start = timer.read();
-    
-    for (0..iters) |_| {
-        var shared = Shared{
-            .iter = std.atomic.Value(u32).init(0),
-            .result_p1 = std.atomic.Value(u32).init(std.math.maxInt(u32)),
-            .result_p2 = std.atomic.Value(u32).init(std.math.maxInt(u32)),
-            .found_p1 = std.atomic.Value(bool).init(false),
-            .found_p2 = std.atomic.Value(bool).init(false),
-        };
-        try run_solve(&shared);
-    }
-    
-    const elapsed_ns = timer.read() - start;
-    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    std.debug.print("Total: {d:.2} microseconds\n", .{elapsed_us});
-    std.debug.print("Average: {d:.2} microseconds\n", .{elapsed_us / @as(f64, @floatFromInt(iters))});
+    try run_solve(&shared);
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
+
+    std.debug.print("Part 1: {}\n", .{shared.result_p1.load(.monotonic)});
+    std.debug.print("Part 2: {}\n", .{shared.result_p2.load(.monotonic)});
+    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }
 
 fn run_solve(shared: *Shared) !void {
     const num_threads = @max(std.Thread.getCpuCount() catch 8, 1);
     var threads: [32]std.Thread = undefined;
     const actual_threads = @min(num_threads, threads.len);
-    
+
     for (0..actual_threads) |i| {
         threads[i] = try std.Thread.spawn(.{}, workerThread, .{shared});
     }
-    
+
     for (0..actual_threads) |i| {
         threads[i].join();
     }

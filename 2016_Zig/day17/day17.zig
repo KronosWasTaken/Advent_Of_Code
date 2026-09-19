@@ -1,106 +1,125 @@
 const std = @import("std");
 
-const S = [64]u32{
-    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
-    5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20, 5, 9,  14, 20,
-    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
-    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
-};
-const K = [64]u32{
-    0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee,
-    0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
-    0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be,
-    0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
-    0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa,
-    0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
-    0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed,
-    0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
-    0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c,
-    0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
-    0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05,
-    0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
-    0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039,
-    0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
-    0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1,
-    0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391,
-};
-const Result = struct { p1: []const u8, p2: u32 };
-const State = struct {
-    x: i8,
-    y: i8,
-    path: []u8,
-};
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const file = try std.fs.cwd().openFile("input.txt", .{});
-    defer file.close();
-    const input = try file.readToEndAlloc(allocator, 1024 * 1024);
-    defer allocator.free(input);
-    var timer = try std.time.Timer.start();
-    const result = try solve(allocator, input);
-    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
-    std.debug.print("Part 1: {s} | Part 2: {}\n", .{ result.p1, result.p2 });
-    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
-    allocator.free(result.p1);
+inline fn getDoors(msg: []const u8) [4]bool {
+    var hash: [16]u8 = undefined;
+    std.crypto.hash.Md5.hash(msg, &hash, .{});
+    return .{
+        hash[0] >= 0xb0,
+        (hash[0] & 0x0f) >= 0x0b,
+        hash[1] >= 0xb0,
+        (hash[1] & 0x0f) >= 0x0b,
+    };
 }
-fn solve(allocator: std.mem.Allocator, input: []const u8) !Result {
-    var passcode = std.mem.trim(u8, input, &std.ascii.whitespace);
 
-    if (std.mem.lastIndexOf(u8, passcode, " ")) |idx| {
-        passcode = passcode[idx + 1 ..];
+const DIRS = "UDLR";
+const DX = [4]i8{ 0, 0, -1, 1 };
+const DY = [4]i8{ -1, 1, 0, 0 };
+
+fn dfsLongest(buf: []u8, len: usize, x: i8, y: i8, max_len: *u32) void {
+    if (x == 3 and y == 3) {
+        max_len.* = @max(max_len.*, @as(u32, @intCast(len)));
+        return;
     }
 
-    if (passcode.len > 0 and passcode[passcode.len - 1] == '.') {
-        passcode = passcode[0..passcode.len - 1];
-    }
-    var shortest: ?[]const u8 = null;
-    var longest: u32 = 0;
-    var queue = std.ArrayListUnmanaged(State){};
-    defer {
-        for (queue.items) |state| {
-            allocator.free(state.path);
-        }
-        queue.deinit(allocator);
-    }
-    const initial_path = try allocator.dupe(u8, passcode);
-    try queue.append(allocator, .{ .x = 0, .y = 0, .path = initial_path });
-    var head: usize = 0;
-    while (head < queue.items.len) {
-        const state = queue.items[head];
-        head += 1;
-        if (state.x == 3 and state.y == 3) {
+    const doors = getDoors(buf[0..len]);
 
-            const path_str = state.path[passcode.len..];
-            if (shortest == null) {
-                shortest = try allocator.dupe(u8, path_str);
+    inline for (0..4) |i| {
+        if (doors[i]) {
+            const nx = x + DX[i];
+            const ny = y + DY[i];
+            if (nx >= 0 and nx <= 3 and ny >= 0 and ny <= 3) {
+                buf[len] = DIRS[i];
+                dfsLongest(buf, len + 1, nx, ny, max_len);
             }
-            longest = @max(longest, @as(u32, @intCast(path_str.len)));
-
-            continue;
-        }
-        var hash: [16]u8 = undefined;
-        md5Hash(state.path, &hash);
-
-        const doors = [4]u8{ hash[0] >> 4, hash[0] & 0xf, hash[1] >> 4, hash[1] & 0xf };
-        const dirs = "UDLR";
-        const moves = [_][2]i8{ .{0, -1}, .{0, 1}, .{-1, 0}, .{1, 0} };
-        for (0..4) |i| {
-
-            if (doors[i] < 0xb) continue;
-            const nx = state.x + moves[i][0];
-            const ny = state.y + moves[i][1];
-            if (nx < 0 or nx > 3 or ny < 0 or ny > 3) continue;
-            var new_path = try allocator.alloc(u8, state.path.len + 1);
-            @memcpy(new_path[0..state.path.len], state.path);
-            new_path[state.path.len] = dirs[i];
-            try queue.append(allocator, .{ .x = nx, .y = ny, .path = new_path });
         }
     }
-    return .{ .p1 = shortest orelse try allocator.dupe(u8, ""), .p2 = longest };
 }
-fn md5Hash(msg: []const u8, out: *[16]u8) void {
 
-    std.crypto.hash.Md5.hash(msg, out, .{});
+pub fn main() !void {
+    const raw = @embedFile("input.txt");
+    const passcode = std.mem.trim(u8, raw, " \r\n\t.");
+
+    var timer = try std.time.Timer.start();
+
+    // Part 1: BFS for shortest path (zero heap allocations)
+    var node_parent: [2048]u16 = undefined;
+    var node_dir: [2048]u8 = undefined;
+    var node_x: [2048]i8 = undefined;
+    var node_y: [2048]i8 = undefined;
+
+    var queue_head: usize = 0;
+    var queue_tail: usize = 1;
+    node_x[0] = 0;
+    node_y[0] = 0;
+    node_parent[0] = 0;
+
+    var p1_buf: [128]u8 = undefined;
+    var p1_len: usize = 0;
+
+    var work_buf: [256]u8 = undefined;
+    @memcpy(work_buf[0..passcode.len], passcode);
+
+    while (queue_head < queue_tail) {
+        const cur_idx = queue_head;
+        queue_head += 1;
+
+        const x = node_x[cur_idx];
+        const y = node_y[cur_idx];
+
+        if (x == 3 and y == 3) {
+            var trace = cur_idx;
+            var path_rev: [128]u8 = undefined;
+            var rev_len: usize = 0;
+            while (trace != 0) {
+                path_rev[rev_len] = node_dir[trace];
+                rev_len += 1;
+                trace = node_parent[trace];
+            }
+            p1_len = rev_len;
+            for (0..rev_len) |k| {
+                p1_buf[k] = path_rev[rev_len - 1 - k];
+            }
+            break;
+        }
+
+        var trace = cur_idx;
+        var rev_len: usize = 0;
+        var path_rev: [128]u8 = undefined;
+        while (trace != 0) {
+            path_rev[rev_len] = node_dir[trace];
+            rev_len += 1;
+            trace = node_parent[trace];
+        }
+        for (0..rev_len) |k| {
+            work_buf[passcode.len + k] = path_rev[rev_len - 1 - k];
+        }
+        const cur_total_len = passcode.len + rev_len;
+
+        const doors = getDoors(work_buf[0..cur_total_len]);
+
+        inline for (0..4) |i| {
+            if (doors[i]) {
+                const nx = x + DX[i];
+                const ny = y + DY[i];
+                if (nx >= 0 and nx <= 3 and ny >= 0 and ny <= 3) {
+                    node_x[queue_tail] = nx;
+                    node_y[queue_tail] = ny;
+                    node_parent[queue_tail] = @intCast(cur_idx);
+                    node_dir[queue_tail] = DIRS[i];
+                    queue_tail += 1;
+                }
+            }
+        }
+    }
+
+    // Part 2: DFS for longest path (zero heap allocations)
+    var p2_buf: [1024]u8 = undefined;
+    @memcpy(p2_buf[0..passcode.len], passcode);
+    var max_path_len: u32 = 0;
+    dfsLongest(&p2_buf, passcode.len, 0, 0, &max_path_len);
+    const p2 = max_path_len - @as(u32, @intCast(passcode.len));
+
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
+    std.debug.print("Part 1: {s} | Part 2: {}\n", .{ p1_buf[0..p1_len], p2 });
+    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }

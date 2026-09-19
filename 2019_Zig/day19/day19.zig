@@ -1,207 +1,235 @@
 const std = @import("std");
 
-const Result = struct { p1: i64, p2: i64 };
+fn runIntcode(code: []const i64, x: i64, y: i64) bool {
+    var mem: [1024]i64 = undefined;
+    @memcpy(mem[0..code.len], code);
+    @memset(mem[code.len..], 0);
 
+    var ip: usize = 0;
+    var rel_base: i64 = 0;
+    var input_step: usize = 0;
 
-const Computer = struct {
-    V: [20000]i64 = undefined,
-    i: usize = 0,
-    r: i64 = 0,
-    output: i64 = 0,
-    inputs: [2]i64 = undefined,
-    input_ptr: usize = 0,
+    while (true) {
+        const instr = mem[ip];
+        const opcode = @mod(instr, 100);
+        const m1 = @mod(@divFloor(instr, 100), 10);
+        const m2 = @mod(@divFloor(instr, 1000), 10);
+        const m3 = @mod(@divFloor(instr, 10000), 10);
 
-    fn init(code: []const i64) Computer {
-        var self: Computer = undefined;
-        @memset(&self.V, 0);
-        @memcpy(self.V[0..code.len], code);
-        self.i = 0;
-        self.r = 0;
-        self.output = 0;
-        self.input_ptr = 0;
-        return self;
-    }
-
-    fn setInputs(self: *Computer, x: i64, y: i64) void {
-        self.inputs[0] = x;
-        self.inputs[1] = y;
-        self.input_ptr = 0;
-    }
-
-    fn getParam(self: *Computer, mode: i64, idx: usize) i64 {
-        const param = self.V[self.i + idx];
-        return switch (mode) {
-            0 => self.V[@intCast(param)],
-            1 => param,
-            2 => self.V[@intCast(self.r + param)],
-            else => 0,
-        };
-    }
-
-    fn setParam(self: *Computer, mode: i64, idx: usize, val: i64) void {
-        const param = self.V[self.i + idx];
-        const addr: usize = switch (mode) {
-            0 => @intCast(param),
-            2 => @intCast(self.r + param),
-            else => @intCast(param),
-        };
-        self.V[addr] = val;
-    }
-
-    fn runToOutput(self: *Computer) bool {
-        while (true) {
-            const instr = self.V[self.i];
-            const opcode = @mod(instr, 100);
-            const m1 = @mod(@divFloor(instr, 100), 10);
-            const m2 = @mod(@divFloor(instr, 1000), 10);
-            const m3 = @mod(@divFloor(instr, 10000), 10);
-
-            switch (opcode) {
-                1 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.setParam(m3, 3, p1 + p2);
-                    self.i += 4;
-                },
-                2 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.setParam(m3, 3, p1 * p2);
-                    self.i += 4;
-                },
-                3 => {
-                    if (self.input_ptr >= 2) return false;
-                    self.setParam(m1, 1, self.inputs[self.input_ptr]);
-                    self.input_ptr += 1;
-                    self.i += 2;
-                },
-                4 => {
-                    self.output = self.getParam(m1, 1);
-                    self.i += 2;
-                    return true;
-                },
-                5 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.i = if (p1 != 0) @intCast(p2) else self.i + 3;
-                },
-                6 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.i = if (p1 == 0) @intCast(p2) else self.i + 3;
-                },
-                7 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.setParam(m3, 3, @intFromBool(p1 < p2));
-                    self.i += 4;
-                },
-                8 => {
-                    const p1 = self.getParam(m1, 1);
-                    const p2 = self.getParam(m2, 2);
-                    self.setParam(m3, 3, @intFromBool(p1 == p2));
-                    self.i += 4;
-                },
-                9 => {
-                    const p1 = self.getParam(m1, 1);
-                    self.r += p1;
-                    self.i += 2;
-                },
-                99 => return false,
-                else => return false,
+        const getParam = struct {
+            fn get(m: []const i64, rb: i64, mode: i64, val: i64) i64 {
+                return switch (mode) {
+                    0 => m[@intCast(val)],
+                    1 => val,
+                    2 => m[@intCast(rb + val)],
+                    else => 0,
+                };
             }
+        }.get;
+
+        const getAddr = struct {
+            fn addr(rb: i64, mode: i64, val: i64) usize {
+                return switch (mode) {
+                    0 => @intCast(val),
+                    2 => @intCast(rb + val),
+                    else => @intCast(val),
+                };
+            }
+        }.addr;
+
+        switch (opcode) {
+            1 => {
+                const a = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const b = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                const dst = getAddr(rel_base, m3, mem[ip + 3]);
+                mem[dst] = a + b;
+                ip += 4;
+            },
+            2 => {
+                const a = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const b = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                const dst = getAddr(rel_base, m3, mem[ip + 3]);
+                mem[dst] = a * b;
+                ip += 4;
+            },
+            3 => {
+                const dst = getAddr(rel_base, m1, mem[ip + 1]);
+                if (input_step == 0) {
+                    mem[dst] = x;
+                    input_step = 1;
+                } else {
+                    mem[dst] = y;
+                    input_step = 2;
+                }
+                ip += 2;
+            },
+            4 => {
+                const val = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                return val == 1;
+            },
+            5 => {
+                const cond = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const target = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                if (cond != 0) {
+                    ip = @intCast(target);
+                } else {
+                    ip += 3;
+                }
+            },
+            6 => {
+                const cond = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const target = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                if (cond == 0) {
+                    ip = @intCast(target);
+                } else {
+                    ip += 3;
+                }
+            },
+            7 => {
+                const a = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const b = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                const dst = getAddr(rel_base, m3, mem[ip + 3]);
+                mem[dst] = if (a < b) 1 else 0;
+                ip += 4;
+            },
+            8 => {
+                const a = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                const b = getParam(&mem, rel_base, m2, mem[ip + 2]);
+                const dst = getAddr(rel_base, m3, mem[ip + 3]);
+                mem[dst] = if (a == b) 1 else 0;
+                ip += 4;
+            },
+            9 => {
+                const a = getParam(&mem, rel_base, m1, mem[ip + 1]);
+                rel_base += a;
+                ip += 2;
+            },
+            99 => return false,
+            else => return false,
         }
+    }
+}
+
+const BeamGeometry = struct {
+    code: []const i64,
+    scale: i64,
+    lower: i64,
+    upper: i64,
+
+    fn isInside(self: BeamGeometry, x: i64, y: i64) bool {
+        if (self.scale * y <= self.upper * x) {
+            return false;
+        }
+        if (self.scale * x <= self.lower * y) {
+            return false;
+        }
+        return runIntcode(self.code, x, y);
     }
 };
 
-fn parseIntcode(input: []const u8) [5000]i64 {
-    var code: [5000]i64 = undefined;
-    @memset(&code, 0);
-    var code_len: usize = 0;
+fn parseBeamGeometry(code: []const i64) BeamGeometry {
+    var lower: i64 = 1;
+    var upper: i64 = 1;
+    var scale: i64 = 5;
 
-    var num: i64 = 0;
-    var negative = false;
-    var in_number = false;
+    while (scale < 1024) {
+        scale *= 2;
+        lower *= 2;
+        upper *= 2;
 
-    for (input) |c| {
-        if (c == '-') {
-            negative = true;
-            in_number = true;
-        } else if (c >= '0' and c <= '9') {
-            num = num * 10 + (c - '0');
-            in_number = true;
-        } else if (c == ',' or c == '\n' or c == '\r') {
-            if (in_number) {
-                code[code_len] = if (negative) -num else num;
-                code_len += 1;
-                num = 0;
-                negative = false;
-                in_number = false;
-            }
+        while (!runIntcode(code, lower + 1, scale)) {
+            lower += 1;
+        }
+        while (!runIntcode(code, scale, upper + 1)) {
+            upper += 1;
         }
     }
-    if (in_number) {
-        code[code_len] = if (negative) -num else num;
-    }
 
-    return code;
+    return .{
+        .code = code,
+        .scale = scale,
+        .lower = lower,
+        .upper = upper,
+    };
 }
 
-fn test_point(code: *const [5000]i64, x: i64, y: i64) bool {
-    var computer = Computer.init(code);
-    computer.setInputs(x, y);
-    _ = computer.runToOutput();
-    return computer.output != 0;
-}
+fn solveTractor(code: []const i64) struct { p1: i64, p2: i64 } {
+    const geo = parseBeamGeometry(code);
 
-fn solve(input: []const u8) Result {
-    const code = parseIntcode(input);
-
-
-    var part1: i64 = 0;
-    var y: i64 = 0;
+    var part1: i64 = 1;
+    var y: i64 = 1;
     while (y < 50) : (y += 1) {
-        var x: i64 = 0;
+        var left: ?i64 = null;
+        var right: ?i64 = null;
+
+        var x: i64 = 1;
         while (x < 50) : (x += 1) {
-            if (test_point(&code, x, y)) {
-                part1 += 1;
+            if (geo.isInside(x, y)) {
+                left = x;
+                break;
+            }
+        }
+
+        if (left) |l| {
+            var rx: i64 = 49;
+            while (rx >= l) : (rx -= 1) {
+                if (geo.isInside(rx, y)) {
+                    right = rx;
+                    break;
+                }
+            }
+            if (right) |r| {
+                part1 += r - l + 1;
             }
         }
     }
 
-
-    var px: i64 = 0;
-    var py: i64 = 0;
+    const det = geo.scale * geo.scale - geo.lower * geo.upper;
+    var px = @divTrunc(99 * (geo.lower * geo.upper + geo.lower * geo.scale), det);
+    var py = @divTrunc(99 * (geo.lower * geo.upper + geo.upper * geo.scale), det);
     var moved = true;
 
     while (moved) {
         moved = false;
-
-
-        while (!test_point(&code, px, py + 99)) {
+        while (!geo.isInside(px, py + 99)) {
             px += 1;
             moved = true;
         }
-
-
-        while (!test_point(&code, px + 99, py)) {
+        while (!geo.isInside(px + 99, py)) {
             py += 1;
             moved = true;
         }
     }
 
     const part2 = 10000 * px + py;
+    return .{
+        .p1 = part1,
+        .p2 = part2,
+    };
+}
 
-    return Result{ .p1 = part1, .p2 = part2 };
+fn parseProgram(input: []const u8, buf: []i64) []const i64 {
+    var len: usize = 0;
+    var it = std.mem.tokenizeAny(u8, input, ",\r\n ");
+    while (it.next()) |token| {
+        if (token.len == 0) {
+            continue;
+        }
+        buf[len] = std.fmt.parseInt(i64, token, 10) catch continue;
+        len += 1;
+    }
+    return buf[0..len];
 }
 
 pub fn main() !void {
-    const input = @embedFile("input.txt");
+    const raw = @embedFile("input.txt");
+    var code_buf: [1024]i64 = undefined;
+    const code = parseProgram(raw, &code_buf);
 
     var timer = try std.time.Timer.start();
-    const start = timer.read();
-    const result = solve(input);
-    const elapsed_ns = timer.read() - start;
-    const elapsed_ms = @as(f64, @floatFromInt(elapsed_ns)) / 1_000_000.0;
-    std.debug.print("Part 1: {}\nPart 2: {}\nTime: {d:.2} ms\n", .{ result.p1, result.p2, elapsed_ms });
+    const res = solveTractor(code);
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
+
+    std.debug.print("Part 1: {}\nPart 2: {}\n", .{ res.p1, res.p2 });
+    std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }

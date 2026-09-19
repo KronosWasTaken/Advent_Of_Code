@@ -424,28 +424,50 @@ const Solver = struct {
 
         const num_items = self.inventory.items.len;
         const combinations: usize = @as(usize, 1) << @intCast(num_items);
+        var have: usize = 0;
+        var want: usize = 0;
 
-        var combo: usize = 0;
-        while (combo < combinations) : (combo += 1) {
-            var idx: usize = 0;
-            while (idx < num_items) : (idx += 1) {
-                const should_have = (combo & (@as(usize, 1) << @intCast(idx))) != 0;
-                if (should_have) {
-                    try self.take(self.inventory.items[idx]);
+        var too_heavy = std.ArrayListUnmanaged(usize){};
+        defer too_heavy.deinit(self.allocator);
+        var too_light = std.ArrayListUnmanaged(usize){};
+        defer too_light.deinit(self.allocator);
+
+        var step: usize = 1;
+        outer: while (step < combinations) : (step += 1) {
+            const current = step ^ (step >> 1);
+            want = current;
+
+            for (too_heavy.items) |heavy| {
+                if ((want & heavy) == heavy) {
+                    continue :outer;
                 }
             }
+            for (too_light.items) |light| {
+                if ((want & light) == want) {
+                    continue :outer;
+                }
+            }
+
+            var diff = have ^ want;
+            while (diff != 0) {
+                const bit_idx = @ctz(diff);
+                diff &= diff - 1;
+                const mask = @as(usize, 1) << @intCast(bit_idx);
+                if ((have & mask) != 0) {
+                    try self.drop(self.inventory.items[bit_idx]);
+                } else {
+                    try self.take(self.inventory.items[bit_idx]);
+                }
+            }
+            have = want;
 
             if (try self.tryWeight(goal_direction)) |result| {
-                if (result > 100) {
+                if (result == -1) {
+                    try too_heavy.append(self.allocator, want);
+                } else if (result == 1) {
+                    try too_light.append(self.allocator, want);
+                } else if (result > 100) {
                     return result;
-                }
-            }
-
-            idx = 0;
-            while (idx < num_items) : (idx += 1) {
-                const was_held = (combo & (@as(usize, 1) << @intCast(idx))) != 0;
-                if (was_held) {
-                    try self.drop(self.inventory.items[idx]);
                 }
             }
         }

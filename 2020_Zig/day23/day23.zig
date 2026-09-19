@@ -8,43 +8,47 @@ const Result = struct {
 const Cup = u32;
 
 fn parseInput(allocator: std.mem.Allocator, input: []const u8) ![]Cup {
-    var clean = std.ArrayListUnmanaged(u8){};
-    defer clean.deinit(allocator);
-    for (input) |ch| {
-        if (ch != '\r') try clean.append(allocator, ch);
+    var list = std.ArrayListUnmanaged(Cup){};
+    errdefer list.deinit(allocator);
+
+    for (input) |char| {
+        if (char >= '1' and char <= '9') {
+            try list.append(allocator, @as(Cup, char - '0'));
+        }
     }
 
-    var cups = std.ArrayListUnmanaged(Cup){};
-    errdefer cups.deinit(allocator);
-    var lines = std.mem.splitScalar(u8, clean.items, '\n');
-    const line = lines.next() orelse return allocator.alloc(Cup, 0);
-    for (line) |char| {
-        if (char < '0' or char > '9') continue;
-        try cups.append(allocator, @as(Cup, char - '0'));
-    }
-
-    return cups.toOwnedSlice(allocator);
+    return list.toOwnedSlice(allocator);
 }
 
 fn play(cups: []Cup, start: usize, rounds: usize) void {
     @setRuntimeSafety(false);
     var current = start;
     const max = cups.len - 1;
+
     var i: usize = 0;
     while (i < rounds) : (i += 1) {
         const a = @as(usize, cups[current]);
         const b = @as(usize, cups[a]);
         const c = @as(usize, cups[b]);
-        var dest: usize = current - 1;
-        if (dest == 0) dest = max;
-        while (dest == a or dest == b or dest == c) {
-            dest -= 1;
-            if (dest == 0) dest = max;
+        const next_cur = @as(usize, cups[c]);
+
+        var dest = current - 1;
+        if (dest == 0 or dest == a or dest == b or dest == c) {
+            if (dest == 0) {
+                dest = max;
+            }
+            while (dest == a or dest == b or dest == c) {
+                dest -= 1;
+                if (dest == 0) {
+                    dest = max;
+                }
+            }
         }
-        cups[current] = cups[c];
+
+        cups[current] = @intCast(next_cur);
         cups[c] = cups[dest];
         cups[dest] = @intCast(a);
-        current = @as(usize, cups[current]);
+        current = next_cur;
     }
 }
 
@@ -98,9 +102,7 @@ fn part2(input: []const Cup, allocator: std.mem.Allocator) !usize {
 }
 
 fn solve(input_data: []const u8) !Result {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = std.heap.page_allocator;
 
     const cups = try parseInput(allocator, input_data);
     defer allocator.free(cups);
@@ -110,17 +112,18 @@ fn solve(input_data: []const u8) !Result {
 
     const p1 = try part1(cups, allocator);
     const p2 = try part2(cups, allocator);
-    return .{ .p1 = p1, .p2 = p2 };
+    return .{
+        .p1 = p1,
+        .p2 = p2,
+    };
 }
 
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();
-    const start = timer.read();
     const result = try solve(input);
-    const elapsed_ns = timer.read() - start;
-    const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    std.debug.print("Part 1: {}\n", .{result.p1});
-    std.debug.print("Part 2: {}\n", .{result.p2});
+    const elapsed_us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
+
+    std.debug.print("Part 1: {}\nPart 2: {}\n", .{ result.p1, result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }

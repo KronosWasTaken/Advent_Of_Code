@@ -5,7 +5,7 @@ const Result = struct {
     p2: u32,
 };
 
-const THRESHOLD: usize = 0x10000;
+const THRESHOLD: usize = 0x20000;
 const LIMIT1: usize = 2020;
 const LIMIT2: usize = 30_000_000;
 
@@ -20,7 +20,7 @@ fn parseNumbers(allocator: std.mem.Allocator, input: []const u8) ![]u32 {
             continue;
         }
         var value: u32 = 0;
-        while (i < input.len and input[i] >= '0') : (i += 1) {
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
             value = value * 10 + @as(u32, input[i] - '0');
         }
         try list.append(allocator, value);
@@ -30,16 +30,16 @@ fn parseNumbers(allocator: std.mem.Allocator, input: []const u8) ![]u32 {
 }
 
 fn solve(input: []const u8) Result {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const numbers = parseNumbers(arena.allocator(), input) catch unreachable;
+    const allocator = std.heap.page_allocator;
+    const numbers = parseNumbers(allocator, input) catch unreachable;
+    defer allocator.free(numbers);
 
-    const spoken = std.heap.page_allocator.alloc(u32, LIMIT2) catch unreachable;
-    defer std.heap.page_allocator.free(spoken);
+    const spoken = allocator.alloc(u32, LIMIT2) catch unreachable;
+    defer allocator.free(spoken);
     @memset(spoken, 0);
 
-    const seen = std.heap.page_allocator.alloc(u64, LIMIT2 / 64) catch unreachable;
-    defer std.heap.page_allocator.free(seen);
+    const seen = allocator.alloc(u64, LIMIT2 / 64) catch unreachable;
+    defer allocator.free(seen);
     @memset(seen, 0);
 
     var zeroth: u32 = 0;
@@ -74,8 +74,9 @@ fn solve(input: []const u8) Result {
         } else {
             const base = @as(usize, last) >> 6;
             const mask = @as(u64, 1) << @as(u6, @intCast(last & 63));
-            if ((seen[base] & mask) == 0) {
-                seen[base] |= mask;
+            const word = seen[base];
+            if ((word & mask) == 0) {
+                seen[base] = word | mask;
                 spoken[last] = @intCast(i);
                 last = 0;
             } else {
@@ -86,7 +87,10 @@ fn solve(input: []const u8) Result {
         }
     }
 
-    return .{ .p1 = part1, .p2 = last };
+    return .{
+        .p1 = part1,
+        .p2 = last,
+    };
 }
 
 pub fn main() !void {
@@ -96,6 +100,7 @@ pub fn main() !void {
     const result = solve(input);
     const elapsed_ns = timer.read() - start;
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
+
     std.debug.print("Part 1: {}\n", .{result.p1});
     std.debug.print("Part 2: {}\n", .{result.p2});
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});

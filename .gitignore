@@ -9,3 +9,6 @@
 
 # Ignore VS Code settings
 .vscode/
+
+# Scratch directory
+scratch/
