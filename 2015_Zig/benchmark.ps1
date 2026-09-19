@@ -101,21 +101,13 @@ foreach ($d in $daysToRun) {
         }
     }
 
-    $stdoutFile = [System.IO.Path]::GetTempFileName()
-    $stderrFile = [System.IO.Path]::GetTempFileName()
-
-    $proc = Start-Process -FilePath $info.ExeFile -WorkingDirectory $info.Folder -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdoutFile -RedirectStandardError $stderrFile
-
-    $outText = ""
-    if (Test-Path $stdoutFile) { $outText += (Get-Content $stdoutFile -Raw -ErrorAction SilentlyContinue) + "`n" }
-    if (Test-Path $stderrFile) { $outText += (Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue) + "`n" }
-
-    Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
-    Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
+    Push-Location $info.Folder
+    $outText = (& $info.ExeFile 2>&1 | Out-String)
+    Pop-Location
 
     $measured = Parse-TimeMicroseconds $outText
 
-    if ($null -ne $measured -and $measured -gt 0) {
+    if ($null -ne $measured -and $measured -ge 0) {
         $results[$d] = $measured
         $old = if ($existing.ContainsKey($d)) { $existing[$d] } else { $null }
         if ($null -ne $old) {

@@ -28,18 +28,18 @@ The following table summarizes total execution times for all 25 days of each yea
 
 | Year | Execution Time (Total) | Benchmark Documentation |
 | :--- | :--- | :--- |
-| 2015 | 59.65 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
-| 2016 | 138.79 ms | [2016_Zig/benchmark.md](2016_Zig/benchmark.md) |
-| 2017 | 120.09 ms | [2017_Zig/benchmark.md](2017_Zig/benchmark.md) |
+| 2015 | 56.20 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
+| 2016 | 137.47 ms | [2016_Zig/benchmark.md](2016_Zig/benchmark.md) |
+| 2017 | 117.02 ms | [2017_Zig/benchmark.md](2017_Zig/benchmark.md) |
 | 2018 | 93.17 ms | [2018_Zig/benchmark.md](2018_Zig/benchmark.md) |
-| 2019 | 38.00 ms | [2019_Zig/benchmark.md](2019_Zig/benchmark.md) |
-| 2020 | 437.48 ms | [2020_Zig/benchmark.md](2020_Zig/benchmark.md) |
-| 2021 | 17.27 ms | [2021_Zig/benchmark.md](2021_Zig/benchmark.md) |
+| 2019 | 37.98 ms | [2019_Zig/benchmark.md](2019_Zig/benchmark.md) |
+| 2020 | 436.52 ms | [2020_Zig/benchmark.md](2020_Zig/benchmark.md) |
+| 2021 | 17.09 ms | [2021_Zig/benchmark.md](2021_Zig/benchmark.md) |
 | 2022 | 7.87 ms | [2022_Zig/benchmark.md](2022_Zig/benchmark.md) |
 | 2023 | 11.67 ms | [2023_Zig/benchmark.md](2023_Zig/benchmark.md) |
-| 2024 | 22.00 ms | [2024_Zig/benchmark.md](2024_Zig/benchmark.md) |
-| 2025 | 9.27 ms | [2025_Zig/benchmark.md](2025_Zig/benchmark.md) |
-| **Total** | **955.25 ms (0.96 s)** | |
+| 2024 | 21.90 ms | [2024_Zig/benchmark.md](2024_Zig/benchmark.md) |
+| 2025 | 9.24 ms | [2025_Zig/benchmark.md](2025_Zig/benchmark.md) |
+| **Total** | **946.14 ms (0.95 s)** | |
 
 ---
 
