@@ -47,7 +47,7 @@ The following table summarizes total execution times for all 25 days of each yea
 
 Benchmarks for 2015-2025 were collected on the following system:
 
-- OS: Windows 25H2 (Build 26200.7840)
+- OS: Windows 25H2 (Build 26200.9457)
 - CPU: AMD Ryzen 5 6600H with Radeon Graphics
 - Laptop: Lenovo IdeaPad Gaming 3 15ARH7
 - GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM, driver 617.42, power limit 85 W in gaming mode)
