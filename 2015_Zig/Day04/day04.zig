@@ -44,14 +44,9 @@ fn loadDriver(lib: *std.DynLib) !Driver {
 }
 
 const batch: u32 = 1 << 24;
-const threads: c_uint = 256;
+const threads: c_uint = 128;
 
-fn process(drv: *const Driver, fun: CUfunction, digits: u32, d_best1: CUdeviceptr, d_best2: CUdeviceptr) !void {
-    var lo: u32 = 1;
-    var i: u32 = 1;
-    while (i < digits) : (i += 1) lo *= 10;
-    const hi = lo * 10;
-
+fn process(drv: *const Driver, fun: CUfunction, lo: u32, hi: u32, digits: u32, d_best1: CUdeviceptr, d_best2: CUdeviceptr) !void {
     var s = lo;
     while (s < hi) {
         const cnt = @min(hi - s, batch);
@@ -66,7 +61,6 @@ fn process(drv: *const Driver, fun: CUfunction, digits: u32, d_best1: CUdevicept
         s += cnt;
     }
 }
-
 pub fn main() !void {
     var lib = try std.DynLib.open("nvcuda.dll");
     defer lib.close();
@@ -92,8 +86,7 @@ pub fn main() !void {
     _ = drv.memset32(d_best2, 0xFFFFFFFF, 1);
 
     var timer = try std.time.Timer.start();
-    var digits: u32 = 1;
-    while (digits <= 7) : (digits += 1) try process(&drv, fun, digits, d_best1, d_best2);
+    try process(&drv, fun, 1, 10000000, 0, d_best1, d_best2);
     if (drv.sync() != 0) return error.LaunchFailed;
     var p1: u32 = undefined;
     var p2: u32 = undefined;

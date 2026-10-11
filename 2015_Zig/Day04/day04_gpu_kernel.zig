@@ -69,8 +69,29 @@ inline fn md5Seven(n: u32) u32 {
     return md5Rounds(&M);
 }
 
+// Six digits: first four through the prefix table, last two computed directly.
+inline fn md5Six(n: u32) u32 {
+    const p = n / 100;
+    const t = n - p * 100;
+    var M = [_]u32{0} ** 16;
+    M[0] = 0x75727769;
+    M[1] = 0x62717670;
+    M[2] = TBL4[p];
+    M[3] = digit(t / 10) | (digit(t % 10) << 8) | 0x800000;
+    M[14] = 14 * 8;
+    return md5Rounds(&M);
+}
+
+fn countDigits(n: u32) u32 {
+    var d: u32 = 1;
+    var q = n;
+    while (q >= 10) : (q /= 10) d += 1;
+    return d;
+}
+
 // Any digit count, with the digits written one by one.
-inline fn md5Generic(n: u32, digits: u32) u32 {
+inline fn md5Generic(n: u32, digits_arg: u32) u32 {
+    const digits = if (digits_arg == 0) countDigits(n) else digits_arg;
     var M = [_]u32{0} ** 16;
     M[0] = 0x75727769;
     M[1] = 0x62717670;
@@ -100,10 +121,11 @@ inline fn blockDim() u32 {
 }
 
 export fn search(start: u32, count: u32, digits: u32, best1: *u32, best2: *u32) callconv(.kernel) void {
+    _ = digits;
     const idx = blockIdx() * blockDim() + threadIdx();
     if (idx >= count) return;
     const n = start + idx;
-    const h0 = if (digits == 7) md5Seven(n) else md5Generic(n, digits);
+    const h0 = if (n >= 1000000) md5Seven(n) else if (n >= 100000) md5Six(n) else md5Generic(n, 0);
     if (h0 & 0x00F0FFFF == 0) _ = @atomicRmw(u32, best1, .Min, n, .monotonic);
     if (h0 & 0x00FFFFFF == 0) _ = @atomicRmw(u32, best2, .Min, n, .monotonic);
 }
