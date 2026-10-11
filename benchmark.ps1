@@ -6,6 +6,9 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$mu = [char]0x03BC
+$us = "${mu}s"
+$legacyUs = "$([char]0x00CE)$([char]0x00BC)s"
 $rootDir = Get-Location
 
 $years = 2015..2025
@@ -35,7 +38,7 @@ if (-not $SummaryOnly) {
 Write-Host "`n========================================================" -ForegroundColor Green
 Write-Host " ALL-YEARS AOC BENCHMARK SUMMARY (2015 - 2025)" -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Green
-Write-Host ("{0,-8} | {1,-14} | {2,-14}" -f "Year", "Time (μs)", "Time (ms)")
+Write-Host ("{0,-8} | {1,-14} | {2,-14}" -f "Year", "Time ($us)", "Time (ms)")
 Write-Host ("-" * 44)
 
 $yearTotals = @{}
@@ -46,7 +49,7 @@ foreach ($y in $years) {
     $totalUs = 0.0
     if (Test-Path $benchPath) {
         $content = [System.IO.File]::ReadAllText($benchPath, [System.Text.Encoding]::UTF8)
-        if ($content -match '### \*\*Total:\*\*\s*([0-9.,]+)\s*μs') {
+        if ($content -match "(?i)### \*\*Total:\*\*\s*([0-9.,]+)\s*(?:$us|us|$legacyUs)") {
             $numStr = $Matches[1] -replace ',', ''
             $parsed = 0.0
             if ([double]::TryParse($numStr, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$parsed)) {

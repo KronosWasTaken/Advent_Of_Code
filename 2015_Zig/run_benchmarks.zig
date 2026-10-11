@@ -38,9 +38,9 @@ pub fn main() !void {
             });
             
             if (parseTime(result.stderr)) |t| {
-                if (t < best_time) best_time = t;
+                if (t > 0 and t < best_time) best_time = t;
             } else if (parseAverage(result.stderr)) |t| {
-                 if (t < best_time) best_time = t;
+                 if (t > 0 and t < best_time) best_time = t;
             }
         }
         
@@ -93,7 +93,7 @@ fn parseAverage(output: []const u8) ?f64 {
 
 fn readPreviousBenchmarks(allocator: std.mem.Allocator) ![25]f64 {
     var times: [25]f64 = undefined;
-    for (&times) |*t| t = std.math.inf(f64);
+    for (&times) |*t| t.* = std.math.inf(f64);
 
     const file = std.fs.cwd().openFile("benchmark.md", .{}) catch return times;
     defer file.close();
@@ -127,7 +127,10 @@ fn readPreviousBenchmarks(allocator: std.mem.Allocator) ![25]f64 {
                     clean_len += 1;
                 }
             }
-            times[day_idx] = std.fmt.parseFloat(f64, clean_buf[0..clean_len]) catch continue;
+            const val = std.fmt.parseFloat(f64, clean_buf[0..clean_len]) catch continue;
+            if (val > 0) {
+                times[day_idx] = val;
+            }
         }
     }
     return times;

@@ -12,3 +12,10 @@
 
 # Scratch directory
 scratch/
+
+# Expected outputs
+expected_outputs.md
+
+# Audit files and binaries
+*audit*
+$audit*

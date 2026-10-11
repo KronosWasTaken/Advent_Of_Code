@@ -5,38 +5,36 @@ fn solve(data: []const u8) [2]u32 {
     var paper: u32 = 0;
     var ribbon: u32 = 0;
     var i: usize = 0;
-    
+
     while (i < data.len) {
         var l: u32 = data[i] - '0';
         i += 1;
-        while (data[i] >= '0') {
+        while (data[i] != 'x') : (i += 1) {
             l = l * 10 + (data[i] - '0');
-            i += 1;
         }
         i += 1;
 
         var w: u32 = data[i] - '0';
         i += 1;
-        while (data[i] >= '0') {
+        while (data[i] != 'x') : (i += 1) {
             w = w * 10 + (data[i] - '0');
-            i += 1;
         }
         i += 1;
 
         var h: u32 = data[i] - '0';
         i += 1;
-        while (i < data.len and data[i] >= '0') {
+        while (i < data.len and data[i] != '\n' and data[i] != '\r') : (i += 1) {
             h = h * 10 + (data[i] - '0');
-            i += 1;
         }
-        i += 1;
+        while (i < data.len and (data[i] == '\n' or data[i] == '\r')) : (i += 1) {}
 
         if (l > w) { const t = l; l = w; w = t; }
         if (w > h) { const t = w; w = h; h = t; }
         if (l > w) { const t = l; l = w; w = t; }
 
-        paper += 2 * (l*w + w*h + h*l) + (l*w);
-        ribbon += 2 * (l + w) + (l * w * h);
+        const lw = l * w;
+        paper += 2 * (lw + w * h + h * l) + lw;
+        ribbon += 2 * (l + w) + (lw * h);
     }
     return .{ paper, ribbon };
 }

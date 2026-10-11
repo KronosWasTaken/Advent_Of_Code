@@ -1,88 +1,54 @@
 const std = @import("std");
-const NCR = [_][6]u32{
-    .{ 1, 0, 0, 0, 0, 0 },
-    .{ 1, 1, 0, 0, 0, 0 },
-    .{ 1, 2, 1, 0, 0, 0 },
-    .{ 1, 3, 3, 1, 0, 0 },
-    .{ 1, 4, 6, 4, 1, 0 },
-    .{ 1, 5, 10, 10, 5, 1 },
-};
-fn combinations(sizes: []const u8, freqs: []const u8, idx: u8, containers: u8, litres: u8, factor: u32, result: []u32) void {
-    const n = freqs[idx];
-    const size = sizes[idx];
-    const is_last = idx >= sizes.len - 1;
-    var next = litres;
-    var r: u8 = 0;
-    while (r <= n) : (r += 1) {
-        const new_factor = factor * NCR[n][r];
-        if (next < 150) {
-            if (!is_last) {
-                combinations(sizes, freqs, idx + 1, containers + r, next, new_factor, result);
-            }
-        } else {
-            if (next == 150) {
-                result[containers + r] += new_factor;
-            }
-            break;
-        }
-        next += size;
-    }
-}
-fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
+
+inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
-    var containers: [20]u8 = undefined;
-    var count: u8 = 0;
+    var items: [24]usize = undefined;
+    var count: usize = 0;
+
     var idx: usize = 0;
     while (idx < input.len) {
-        if (input[idx] >= '0' and input[idx] <= '9') {
-            var val: u8 = 0;
-            while (idx < input.len and input[idx] >= '0' and input[idx] <= '9') : (idx += 1) {
-                val = val * 10 + (input[idx] - '0');
+        while (idx < input.len and (input[idx] < '0' or input[idx] > '9')) : (idx += 1) {}
+        if (idx >= input.len) break;
+        var val: usize = 0;
+        while (idx < input.len and input[idx] >= '0' and input[idx] <= '9') : (idx += 1) {
+            val = val * 10 + (input[idx] - '0');
+        }
+        items[count] = val;
+        count += 1;
+    }
+
+    // Part 1: standard knapsack ways
+    var ways1 = [_]u32{0} ** 151;
+    ways1[0] = 1;
+
+    // Part 2: minimum container restricted ways
+    var ways2 = [_]u32{0} ** 151;
+    var min_cnt = [_]u32{std.math.maxInt(u32)} ** 151;
+    ways2[0] = 1;
+    min_cnt[0] = 0;
+
+    for (items[0..count]) |item| {
+        var i: usize = 150;
+        while (i >= item) : (i -= 1) {
+            // Part 1
+            ways1[i] += ways1[i - item];
+
+            // Part 2
+            const take = min_cnt[i - item] +| 1;
+            const not_take = min_cnt[i];
+
+            if (take < not_take) {
+                ways2[i] = ways2[i - item];
+                min_cnt[i] = take;
+            } else if (take == not_take) {
+                ways2[i] += ways2[i - item];
             }
-            containers[count] = val;
-            count += 1;
-        } else {
-            idx += 1;
         }
     }
-    var i: u8 = 0;
-    while (i < count - 1) : (i += 1) {
-        var j: u8 = i + 1;
-        while (j < count) : (j += 1) {
-            if (containers[j] > containers[i]) {
-                const tmp = containers[i];
-                containers[i] = containers[j];
-                containers[j] = tmp;
-            }
-        }
-    }
-    var sizes: [20]u8 = undefined;
-    var freqs: [20]u8 = undefined;
-    var unique_count: u8 = 0;
-    i = 0;
-    while (i < count) {
-        sizes[unique_count] = containers[i];
-        var freq: u8 = 1;
-        while (i + freq < count and containers[i + freq] == containers[i]) : (freq += 1) {}
-        freqs[unique_count] = freq;
-        i += freq;
-        unique_count += 1;
-    }
-    var result: [20]u32 = [_]u32{0} ** 20;
-    combinations(sizes[0..unique_count], freqs[0..unique_count], 0, 0, 0, 1, &result);
-    var p1: u32 = 0;
-    for (result) |val| {
-        p1 += val;
-    }
-    var p2: u32 = 0;
-    for (result) |val| {
-        if (val > 0) {
-            p2 = val;
-            break;
-        }
-    }
-    return .{ .p1 = p1, .p2 = p2 };
+
+    return .{ .p1 = ways1[150], .p2 = ways2[150] };
 }
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();

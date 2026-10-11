@@ -1,62 +1,97 @@
 const std = @import("std");
-const Deer = struct { spd: u16, fly: u16, rest: u16 };
-fn parse(input: []const u8, deer: []Deer) u8 {
-    var cnt: u8 = 0;
-    var lines = std.mem.tokenizeAny(u8, input, "\r\n");
-    while (lines.next()) |line| {
-        var parts = std.mem.tokenizeScalar(u8, line, ' ');
-        _ = parts.next(); // name
-        _ = parts.next(); // "can"
-        _ = parts.next(); // "fly"
-        const spd = std.fmt.parseInt(u16, parts.next().?, 10) catch 0;
-        _ = parts.next(); // "km/s"
-        _ = parts.next(); // "for"
-        const fly = std.fmt.parseInt(u16, parts.next().?, 10) catch 0;
-        _ = parts.next(); // "seconds,"
-        _ = parts.next(); // "but"
-        _ = parts.next(); // "then"
-        _ = parts.next(); // "must"
-        _ = parts.next(); // "rest"
-        _ = parts.next(); // "for"
-        const rest = std.fmt.parseInt(u16, parts.next().?, 10) catch 0;
-        deer[cnt] = .{ .spd = spd, .fly = fly, .rest = rest };
-        cnt += 1;
-    }
-    return cnt;
+
+const Deer = struct {
+    spd: u16,
+    fly: u16,
+    rest: u16,
+};
+
+inline fn traveled(spd: u32, fly: u32, rest: u32, time: u32) u32 {
+    const cycle = fly + rest;
+    const complete = time / cycle;
+    const partial = @min(time % cycle, fly);
+    return spd * (fly * complete + partial);
 }
+
 inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
-    var deer: [16]Deer = undefined;
-    const n = parse(input, &deer);
-    var pts: [16]u32 = [_]u32{0} ** 16;
-    var dists: [16]u32 = [_]u32{0} ** 16;
-    var t: u32 = 1;
-    while (t <= 2503) : (t += 1) {
-        var max_d: u32 = 0;
-        var i: u8 = 0;
-        while (i < n) : (i += 1) {
-            const d = deer[i];
-            const cycle = d.fly + d.rest;
-            const full = t / cycle;
-            const rem = t % cycle;
-            const fly_rem = if (rem < d.fly) rem else d.fly;
-            dists[i] = (full * d.fly + fly_rem) * d.spd;
-            if (dists[i] > max_d) max_d = dists[i];
+    var spd_arr = [_]u16{0} ** 16;
+    var fly_arr = [_]u16{0} ** 16;
+    var rest_arr = [_]u16{0} ** 16;
+    var n: usize = 0;
+
+    var i: usize = 0;
+    while (i < input.len) {
+        while (i < input.len and (input[i] < '0' or input[i] > '9')) : (i += 1) {}
+        if (i >= input.len) break;
+        var spd: u16 = 0;
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            spd = spd * 10 + @as(u16, input[i] - '0');
         }
-        i = 0;
-        while (i < n) : (i += 1) {
-            if (dists[i] == max_d) pts[i] += 1;
+
+        while (i < input.len and (input[i] < '0' or input[i] > '9')) : (i += 1) {}
+        var fly: u16 = 0;
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            fly = fly * 10 + @as(u16, input[i] - '0');
         }
+
+        while (i < input.len and (input[i] < '0' or input[i] > '9')) : (i += 1) {}
+        var rest: u16 = 0;
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            rest = rest * 10 + @as(u16, input[i] - '0');
+        }
+
+        spd_arr[n] = spd;
+        fly_arr[n] = fly;
+        rest_arr[n] = rest;
+        n += 1;
+        while (i < input.len and input[i] != '\n') : (i += 1) {}
     }
+
+    // Part 1: Closed-form formula
     var p1: u32 = 0;
-    var p2: u32 = 0;
-    var i: u8 = 0;
-    while (i < n) : (i += 1) {
-        if (dists[i] > p1) p1 = dists[i];
-        if (pts[i] > p2) p2 = pts[i];
+    for (0..n) |d| {
+        p1 = @max(p1, traveled(spd_arr[d], fly_arr[d], rest_arr[d], 2503));
     }
+
+    // Part 2: Vectorized simulation
+    const Vec = @Vector(16, u16);
+    const spd_vec: Vec = spd_arr;
+    const fly_vec: Vec = fly_arr;
+    const rest_vec: Vec = rest_arr;
+
+    var dist: Vec = @splat(0);
+    var timer: Vec = fly_vec;
+    var is_flying: Vec = [_]u16{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
+    var scores: Vec = @splat(0);
+    const ones: Vec = @splat(1);
+    const zeros: Vec = @splat(0);
+
+    for (0..2503) |_| {
+        // Move flying reindeer
+        dist += @select(u16, is_flying != zeros, spd_vec, zeros);
+        timer -= ones;
+
+        // Check if any timer expired
+        const expired = timer == zeros;
+        if (@reduce(.Or, expired)) {
+            // Flip flying state and reload timer
+            is_flying = @select(u16, expired, ~is_flying & ones, is_flying);
+            const new_timer = @select(u16, is_flying != zeros, fly_vec, rest_vec);
+            timer = @select(u16, expired, new_timer, timer);
+        }
+
+        // Leader scores a point
+        const max_dist = @reduce(.Max, dist);
+        const is_leader = dist == @as(Vec, @splat(max_dist));
+        scores += @select(u16, is_leader, ones, zeros);
+    }
+
+    const p2: u32 = @reduce(.Max, scores);
+
     return .{ .p1 = p1, .p2 = p2 };
 }
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();

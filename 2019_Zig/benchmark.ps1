@@ -4,6 +4,9 @@ param(
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$mu = [char]0x03BC
+$us = "${mu}s"
+$legacyUs = "$([char]0x00CE)$([char]0x00BC)s"
 
 $currentDir = Get-Location
 $year = (Split-Path -Leaf $currentDir) -replace '_Zig', ''
@@ -61,7 +64,7 @@ function Get-DayInfo($d) {
 }
 
 function Parse-TimeMicroseconds($text) {
-    if ($text -match '(?i)(?:Time|Average):\s*([0-9.]+)\s*(?:microseconds|microsecond|μs|us)') {
+    if ($text -match '(?i)(?:Time|Average):\s*([0-9.]+)\s*(?:microseconds|microsecond|$us|us|$legacyUs)') {
         return [double]$Matches[1]
     }
     if ($text -match '(?i)(?:Time|Average):\s*([0-9.]+)\s*ms') {
@@ -112,12 +115,12 @@ foreach ($d in $daysToRun) {
         $old = if ($existing.ContainsKey($d)) { $existing[$d] } else { $null }
         if ($null -ne $old) {
             if ($measured -lt $old) {
-                Write-Host ("Day {0:d2}: UPGRADED! Old: {1:F2} μs -> New: {2:F2} μs (-{3:F2} μs)" -f $d, $old, $measured, ($old - $measured)) -ForegroundColor Green
+                Write-Host ("Day {0:d2}: UPGRADED! Old: {1:F2} $us -> New: {2:F2} $us (-{3:F2} $us)" -f $d, $old, $measured, ($old - $measured)) -ForegroundColor Green
             } else {
-                Write-Host ("Day {0:d2}: Kept best {1:F2} μs (measured {2:F2} μs)" -f $d, $old, $measured) -ForegroundColor DarkGray
+                Write-Host ("Day {0:d2}: Kept best {1:F2} $us (measured {2:F2} $us)" -f $d, $old, $measured) -ForegroundColor DarkGray
             }
         } else {
-            Write-Host ("Day {0:d2}: Initial record {1:F2} μs" -f $d, $measured) -ForegroundColor Yellow
+            Write-Host ("Day {0:d2}: Initial record {1:F2} $us" -f $d, $measured) -ForegroundColor Yellow
         }
     } else {
         Write-Host "Day ${d}: Could not parse execution time" -ForegroundColor Yellow
@@ -127,7 +130,7 @@ foreach ($d in $daysToRun) {
 $lines = @()
 $lines += "# Advent of Code $year - Zig Benchmark Results"
 $lines += ""
-$lines += "| Day | Time (μs) |"
+$lines += "| Day | Time ($us) |"
 $lines += "| :--- | :--- |"
 $total = 0.0
 
@@ -145,7 +148,7 @@ for ($d = 1; $d -le 25; $d++) {
 
     if ($null -ne $best) {
         $total += $best
-        $lines += "| Day {0:d2} | {1:F2} μs |" -f $d, $best
+        $lines += "| Day {0:d2} | {1:F2} $us |" -f $d, $best
     } else {
         $lines += "| Day {0:d2} | N/A |" -f $d
     }
@@ -154,9 +157,9 @@ for ($d = 1; $d -le 25; $d++) {
 $lines += ""
 $lines += "---"
 $lines += ""
-$lines += "### **Total:** {0:F2} μs ({1:F2} ms)" -f $total, ($total / 1000.0)
+$lines += "### **Total:** {0:F2} $us ({1:F2} ms)" -f $total, ($total / 1000.0)
 
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($benchPath, ($lines -join "`n") + "`n", $utf8NoBom)
 
-Write-Host "`n[$year Benchmark Updated] Total: $($total.ToString('F2')) μs ($(($total / 1000.0).ToString('F2')) ms)" -ForegroundColor Cyan
+Write-Host "`n[$year Benchmark Updated] Total: $($total.ToString('F2')) $us ($(($total / 1000.0).ToString('F2')) ms)" -ForegroundColor Cyan

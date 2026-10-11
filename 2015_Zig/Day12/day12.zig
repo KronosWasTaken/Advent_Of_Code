@@ -1,117 +1,86 @@
 const std = @import("std");
-inline fn parseNum(input: []const u8, i: *usize) i32 {
+
+const Result = struct {
+    next: usize,
+    ignore: bool,
+    value: i32,
+};
+
+var p1_sum: i32 = 0;
+
+fn parseNumber(input: []const u8, start: usize) Result {
     @setRuntimeSafety(false);
-    var neg = false;
-    if (input[i.*] == '-') {
-        neg = true;
-        i.* += 1;
+    const neg = input[start] == '-';
+    var end = start + @as(usize, @intFromBool(neg));
+    var acc: i32 = 0;
+    while (input[end] >= '0' and input[end] <= '9') : (end += 1) {
+        acc = acc * 10 + @as(i32, input[end] - '0');
     }
-    var num: i32 = 0;
-    while (i.* < input.len and input[i.*] >= '0' and input[i.*] <= '9') : (i.* += 1) {
-        num = num * 10 + input[i.*] - '0';
-    }
-    return if (neg) -num else num;
+    const val = if (neg) -acc else acc;
+    p1_sum += val;
+    return .{ .next = end, .ignore = false, .value = val };
 }
-fn part1(input: []const u8) i64 {
+
+inline fn skipString(input: []const u8, start: usize) usize {
     @setRuntimeSafety(false);
-    var sum: i64 = 0;
-    var i: usize = 0;
-    while (i < input.len) {
-        const c = input[i];
-        if (c == '-' or (c >= '0' and c <= '9')) {
-            sum += parseNum(input, &i);
-        } else {
-            i += 1;
-        }
-    }
-    return sum;
+    var end = start + 1;
+    while (input[end] != '"') : (end += 1) {}
+    return end + 1;
 }
-inline fn skip(input: []const u8, i: *usize) void {
-    i.* += 1;
-    while (i.* < input.len and input[i.*] != '"') : (i.* += 1) {}
-    i.* += 1;
-}
-fn val(input: []const u8, i: *usize) i64 {
+
+fn parseString(input: []const u8, start: usize) Result {
     @setRuntimeSafety(false);
-    const c = input[i.*];
-    if (c == '{') return obj(input, i);
-    if (c == '[') return arr(input, i);
-    if (c == '"') {
-        skip(input, i);
-        return 0;
-    }
-    if (c == '-' or (c >= '0' and c <= '9')) return parseNum(input, i);
-    while (i.* < input.len and input[i.*] >= 'a' and input[i.*] <= 'z') : (i.* += 1) {}
-    return 0;
+    const s = start + 1;
+    var end = s;
+    while (input[end] != '"') : (end += 1) {}
+    const is_red = (end - s == 3 and input[s] == 'r' and input[s + 1] == 'e' and input[s + 2] == 'd');
+    return .{ .next = end + 1, .ignore = is_red, .value = 0 };
 }
-fn arr(input: []const u8, i: *usize) i64 {
+
+fn parseJson(input: []const u8, start: usize) Result {
     @setRuntimeSafety(false);
-    i.* += 1;
-    var sum: i64 = 0;
-    while (i.* < input.len and input[i.*] != ']') {
-        if (input[i.*] == ',') {
-            i.* += 1;
-        } else {
-            sum += val(input, i);
-        }
-    }
-    i.* += 1;
-    return sum;
+    return switch (input[start]) {
+        '[' => parseArray(input, start),
+        '{' => parseObject(input, start),
+        '"' => parseString(input, start),
+        else => parseNumber(input, start),
+    };
 }
-fn obj(input: []const u8, i: *usize) i64 {
+
+fn parseArray(input: []const u8, start: usize) Result {
     @setRuntimeSafety(false);
-    i.* += 1;
-    var sum: i64 = 0;
-    var nums: [256]i32 = undefined;
-    var num_count: usize = 0;
-    var has_red = false;
-    while (i.* < input.len and input[i.*] != '}') {
-        const c = input[i.*];
-        if (c == ',' or c == ':') {
-            i.* += 1;
-        } else if (c == '"') {
-            const s = i.* + 1;
-            skip(input, i);
-            if (!has_red and i.* - s == 4 and input[s] == 'r' and input[s + 1] == 'e' and input[s + 2] == 'd') {
-                has_red = true;
-            }
-        } else if (c == '{') {
-            const nested = obj(input, i);
-            if (!has_red) {
-                nums[num_count] = @intCast(nested);
-                num_count += 1;
-            }
-        } else if (c == '[') {
-            const nested = arr(input, i);
-            if (!has_red) {
-                nums[num_count] = @intCast(nested);
-                num_count += 1;
-            }
-        } else if (c == '-' or (c >= '0' and c <= '9')) {
-            const n = parseNum(input, i);
-            if (!has_red) {
-                nums[num_count] = n;
-                num_count += 1;
-            }
-        } else {
-            while (i.* < input.len and input[i.*] >= 'a' and input[i.*] <= 'z') : (i.* += 1) {}
-        }
+    var index = start;
+    var total: i32 = 0;
+    while (input[index] != ']') {
+        const res = parseJson(input, index + 1);
+        index = res.next;
+        total += res.value;
     }
-    i.* += 1;
-    if (has_red) return 0;
-    for (0..num_count) |idx| {
-        sum += nums[idx];
-    }
-    return sum;
+    return .{ .next = index + 1, .ignore = false, .value = total };
 }
-fn part2(input: []const u8) i64 {
+
+fn parseObject(input: []const u8, start: usize) Result {
     @setRuntimeSafety(false);
-    var i: usize = 0;
-    return val(input, &i);
+    var index = start;
+    var total: i32 = 0;
+    var ignore = false;
+    while (input[index] != '}') {
+        const key_next = skipString(input, index + 1);
+        const second = parseJson(input, key_next + 1);
+        index = second.next;
+        total += second.value;
+        ignore = ignore or second.ignore;
+    }
+    return .{ .next = index + 1, .ignore = false, .value = if (ignore) 0 else total };
 }
-inline fn solve(input: []const u8) struct { p1: i64, p2: i64 } {
-    return .{ .p1 = part1(input), .p2 = part2(input) };
+
+inline fn solve(input: []const u8) struct { p1: i32, p2: i32 } {
+    @setRuntimeSafety(false);
+    p1_sum = 0;
+    const p2 = parseJson(input, 0).value;
+    return .{ .p1 = p1_sum, .p2 = p2 };
 }
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();

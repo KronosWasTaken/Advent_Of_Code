@@ -36,6 +36,27 @@ inline fn rotateLeftVec(x: Vec, n: u32) Vec {
     return (x << shift) | (x >> inv_shift);
 }
 
+const WORD3_15 = blk: {
+    var tbl: [1000]u32 align(64) = undefined;
+    for (0..1000) |n| {
+        const d0: u32 = '0' + @as(u32, @intCast(n / 100));
+        const d1: u32 = '0' + @as(u32, @intCast((n / 10) % 10));
+        const d2: u32 = '0' + @as(u32, @intCast(n % 10));
+        tbl[n] = d0 | (d1 << 8) | (d2 << 16) | 0x80000000;
+    }
+    break :blk tbl;
+};
+
+const DIGITS = blk: {
+    var tbl: [1000][3]u8 = undefined;
+    for (0..1000) |n| {
+        tbl[n][0] = '0' + @as(u8, @intCast(n / 100));
+        tbl[n][1] = '0' + @as(u8, @intCast((n / 10) % 10));
+        tbl[n][2] = '0' + @as(u8, @intCast(n % 10));
+    }
+    break :blk tbl;
+};
+
 inline fn md5TransformVec(M: [16]Vec) Vec {
     var a: Vec = @splat(0x67452301);
     var b: Vec = @splat(0xefcdab89);
@@ -71,6 +92,106 @@ inline fn md5TransformVec(M: [16]Vec) Vec {
     return a +% @as(Vec, @splat(0x67452301));
 }
 
+const Precomputed = struct {
+    a: u32,
+    b: u32,
+    c: u32,
+    d: u32,
+};
+
+inline fn precomputeRounds012(m2: u32) Precomputed {
+    var a: u32 = 0x67452301;
+    var b: u32 = 0xefcdab89;
+    var c: u32 = 0x98badcfe;
+    var d: u32 = 0x10325476;
+    const m0: u32 = 0x75727769; // "iwru"
+    const m1: u32 = 0x62717670; // "pvqb"
+
+    inline for (0..3) |round| {
+        const F = (b & c) | ((~b) & d);
+        const m = if (round == 0) m0 else if (round == 1) m1 else m2;
+        const temp = F +% a +% K[round] +% m;
+        a = d;
+        d = c;
+        c = b;
+        b = b +% std.math.rotl(u32, temp, S[round]);
+    }
+
+    return .{ .a = a, .b = b, .c = c, .d = d };
+}
+
+const WORD3_14 = blk: {
+    var tbl: [104]u32 align(64) = [_]u32{0} ** 104;
+    for (0..100) |n| {
+        const d0: u32 = '0' + @as(u32, @intCast(n / 10));
+        const d1: u32 = '0' + @as(u32, @intCast(n % 10));
+        tbl[n] = d0 | (d1 << 8) | 0x00800000;
+    }
+    break :blk tbl;
+};
+
+inline fn md5TransformSpecialized(comptime m14: u32, pre: Precomputed, m2: u32, m3: Vec) Vec {
+    const F3_const: u32 = (pre.d ^ (pre.b & (pre.c ^ pre.d))) +% pre.a +% K[3];
+    const F3: Vec = @as(Vec, @splat(F3_const)) +% m3;
+
+    var a: Vec = @splat(pre.d);
+    var d: Vec = @splat(pre.c);
+    var c: Vec = @splat(pre.b);
+    var b: Vec = @as(Vec, @splat(pre.b)) +% rotateLeftVec(F3, S[3]);
+
+    const m0: u32 = 0x75727769;
+    const m1: u32 = 0x62717670;
+    const k29_m2: u32 = K[29] +% m2;
+    const k47_m2: u32 = K[47] +% m2;
+
+    inline for (4..61) |round| {
+        var F: Vec = undefined;
+        if (round < 16) {
+            F = d ^ (b & (c ^ d));
+        } else if (round < 32) {
+            F = c ^ (d & (b ^ c));
+        } else if (round < 48) {
+            F = b ^ c ^ d;
+        } else {
+            F = c ^ (b | (~d));
+        }
+
+        const g = if (round < 16)
+            round
+        else if (round < 32)
+            (5 * round + 1) % 16
+        else if (round < 48)
+            (3 * round + 5) % 16
+        else
+            (7 * round) % 16;
+
+        if (g == 3) {
+            F = F +% a +% @as(Vec, @splat(K[round])) +% m3;
+        } else if (g == 0) {
+            F = F +% a +% @as(Vec, @splat(K[round] +% m0));
+        } else if (g == 1) {
+            F = F +% a +% @as(Vec, @splat(K[round] +% m1));
+        } else if (round == 29) {
+            F = F +% a +% @as(Vec, @splat(k29_m2));
+        } else if (round == 47) {
+            F = F +% a +% @as(Vec, @splat(k47_m2));
+        } else if (g == 14) {
+            F = F +% a +% @as(Vec, @splat(K[round] +% m14));
+        } else {
+            F = F +% a +% @as(Vec, @splat(K[round]));
+        }
+
+        a = d;
+        d = c;
+        c = b;
+        b = b +% rotateLeftVec(F, S[round]);
+    }
+
+    // At the end of round 60, b holds the exact value.
+    // The addition of 0x67452301 is folded into the additive inverse constant comparison!
+    return b;
+}
+
 inline fn formatInt(buf: []u8, n: u32) usize {
     @setRuntimeSafety(false);
     if (n == 0) {
@@ -100,6 +221,7 @@ const Shared = struct {
 };
 
 fn workerThread(shared: *Shared) void {
+    @setEvalBranchQuota(100000);
     @setRuntimeSafety(false);
     var buf: [64]u8 = undefined;
     @memcpy(buf[0..KEY.len], KEY);
@@ -107,22 +229,149 @@ fn workerThread(shared: *Shared) void {
     while (true) {
         if (shared.found_p1.load(.acquire) and shared.found_p2.load(.acquire)) return;
 
-        const chunk_start = shared.iter.fetchAdd(1000, .monotonic);
+        const big_start = shared.iter.fetchAdd(16000, .monotonic);
 
-        if (chunk_start < 1000) {
-            var hash_out: [16]u8 = undefined;
-            for (0..1000) |i| {
-                const n = chunk_start + @as(u32, @intCast(i));
-                if (n == 0) continue;
-                const len = KEY.len + formatInt(buf[KEY.len..], n);
+        var chunk_offset: u32 = 0;
+        while (chunk_offset < 16000) : (chunk_offset += 1000) {
+            if (shared.found_p1.load(.acquire) and shared.found_p2.load(.acquire)) return;
+            const chunk_start = big_start + chunk_offset;
 
-                std.crypto.hash.Md5.hash(buf[0..len], &hash_out, .{});
-                checkResult(n, &hash_out, shared);
+            if (chunk_start < 1000) {
+                var hash_out: [16]u8 = undefined;
+                for (0..1000) |i| {
+                    const n = chunk_start + @as(u32, @intCast(i));
+                    if (n == 0) continue;
+                    const len = KEY.len + formatInt(buf[KEY.len..], n);
+
+                    std.crypto.hash.Md5.hash(buf[0..len], &hash_out, .{});
+                    checkResult(n, &hash_out, shared);
+                }
+                continue;
+            }
+
+        const base_len = KEY.len + formatInt(buf[KEY.len..], chunk_start);
+
+        if (base_len == 14) {
+            const mask5 = @as(Vec, @splat(0x00F0FFFF));
+            const zero_vec = @as(Vec, @splat(0));
+            const a_init = @as(Vec, @splat(0x67452301));
+
+            for (0..10) |h_idx| {
+                const sub_start = chunk_start + @as(u32, @intCast(h_idx * 100));
+                _ = formatInt(buf[KEY.len..], sub_start);
+                const m2 = std.mem.readInt(u32, buf[8..12], .little);
+                const pre = precomputeRounds012(m2);
+
+                var k: u32 = 0;
+                while (k + 16 <= 100) : (k += 16) {
+                    const m3_0 = @as(*align(4) const Vec, @ptrCast(&WORD3_14[k])).*;
+                    const m3_1 = @as(*align(4) const Vec, @ptrCast(&WORD3_14[k + 8])).*;
+
+                    const a0 = md5TransformSpecialized(112, pre, m2, m3_0) +% a_init;
+                    const a1 = md5TransformSpecialized(112, pre, m2, m3_1) +% a_init;
+
+                    const c0 = (a0 & mask5) == zero_vec;
+                    const c1 = (a1 & mask5) == zero_vec;
+
+                    if (@reduce(.Or, c0 | c1)) {
+                        inline for (0..SIMD_WIDTH) |i| {
+                            if (c0[i]) {
+                                const n = sub_start + k + @as(u32, i);
+                                _ = shared.result_p1.fetchMin(n, .monotonic);
+                                shared.found_p1.store(true, .release);
+                                if ((a0[i] & 0x00FFFFFF) == 0) {
+                                    _ = shared.result_p2.fetchMin(n, .monotonic);
+                                    shared.found_p2.store(true, .release);
+                                }
+                            }
+                            if (c1[i]) {
+                                const n = sub_start + k + 8 + @as(u32, i);
+                                _ = shared.result_p1.fetchMin(n, .monotonic);
+                                shared.found_p1.store(true, .release);
+                                if ((a1[i] & 0x00FFFFFF) == 0) {
+                                    _ = shared.result_p2.fetchMin(n, .monotonic);
+                                    shared.found_p2.store(true, .release);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                while (k < 100) : (k += SIMD_WIDTH) {
+                    const m3 = @as(*align(4) const Vec, @ptrCast(&WORD3_14[k])).*;
+                    const a = md5TransformSpecialized(112, pre, m2, m3) +% a_init;
+                    const check5 = (a & mask5) == zero_vec;
+                    if (@reduce(.Or, check5)) {
+                        inline for (0..SIMD_WIDTH) |i| {
+                            if (check5[i]) {
+                                const n = sub_start + k + @as(u32, i);
+                                if (n < sub_start + 100) {
+                                    _ = shared.result_p1.fetchMin(n, .monotonic);
+                                    shared.found_p1.store(true, .release);
+                                    if ((a[i] & 0x00FFFFFF) == 0) {
+                                        _ = shared.result_p2.fetchMin(n, .monotonic);
+                                        shared.found_p2.store(true, .release);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
             continue;
         }
 
-        const base_len = KEY.len + formatInt(buf[KEY.len..], chunk_start);
+        if (base_len == 15) {
+            const m2 = std.mem.readInt(u32, buf[8..12], .little);
+            const pre = precomputeRounds012(m2);
+            const mask6 = @as(Vec, @splat(0x00FFFFFF));
+            const inv6 = @as(Vec, @splat(0x00BADCFF));
+            var offset: u32 = 0;
+
+            // 2x unrolled loop (16 numbers per iteration)
+            while (offset + 16 <= 1000) : (offset += 16) {
+                const m3_0 = @as(*align(4) const Vec, @ptrCast(&WORD3_15[offset])).*;
+                const m3_1 = @as(*align(4) const Vec, @ptrCast(&WORD3_15[offset + 8])).*;
+
+                const b0 = md5TransformSpecialized(120, pre, m2, m3_0);
+                const b1 = md5TransformSpecialized(120, pre, m2, m3_1);
+
+                const c0 = (b0 & mask6) == inv6;
+                const c1 = (b1 & mask6) == inv6;
+
+                if (@reduce(.Or, c0 | c1)) {
+                    inline for (0..SIMD_WIDTH) |i| {
+                        if (c0[i]) {
+                            const n = chunk_start + offset + @as(u32, i);
+                            _ = shared.result_p2.fetchMin(n, .monotonic);
+                            shared.found_p2.store(true, .release);
+                        }
+                        if (c1[i]) {
+                            const n = chunk_start + offset + 8 + @as(u32, i);
+                            _ = shared.result_p2.fetchMin(n, .monotonic);
+                            shared.found_p2.store(true, .release);
+                        }
+                    }
+                }
+            }
+
+            // Remainder (8 numbers at a time)
+            while (offset < 1000) : (offset += SIMD_WIDTH) {
+                const m3 = @as(*align(4) const Vec, @ptrCast(&WORD3_15[offset])).*;
+                const b = md5TransformSpecialized(120, pre, m2, m3);
+                const check6 = (b & mask6) == inv6;
+                if (@reduce(.Or, check6)) {
+                    inline for (0..SIMD_WIDTH) |i| {
+                        if (check6[i]) {
+                            const n = chunk_start + offset + @as(u32, i);
+                            _ = shared.result_p2.fetchMin(n, .monotonic);
+                            shared.found_p2.store(true, .release);
+                        }
+                    }
+                }
+            }
+            continue;
+        }
 
         var buffers: [SIMD_WIDTH][64]u8 = undefined;
         for (0..SIMD_WIDTH) |i| {
@@ -154,49 +403,40 @@ fn workerThread(shared: *Shared) void {
         const w2 = (base_len - 1) / 4;
 
         var offset: u32 = 0;
+        // General path for other lengths
         while (offset < 1000) : (offset += SIMD_WIDTH) {
-            inline for (0..SIMD_WIDTH) |i| {
-                const curr_offset = offset + @as(u32, i);
-
-                buffers[i][base_len - 3] = '0' + @as(u8, @intCast(curr_offset / 100));
-                buffers[i][base_len - 2] = '0' + @as(u8, @intCast((curr_offset / 10) % 10));
-                buffers[i][base_len - 1] = '0' + @as(u8, @intCast(curr_offset % 10));
-            }
-
-            inline for (0..SIMD_WIDTH) |i| {
-                M[w1][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w1 * 4]), .little);
-            }
-            if (w1 != w2) {
                 inline for (0..SIMD_WIDTH) |i| {
-                    M[w2][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w2 * 4]), .little);
+                    const curr_offset = offset + @as(u32, i);
+                    const d = DIGITS[curr_offset];
+                    buffers[i][base_len - 3] = d[0];
+                    buffers[i][base_len - 2] = d[1];
+                    buffers[i][base_len - 1] = d[2];
                 }
-            }
 
-            const a = md5TransformVec(M);
-
-            if (!shared.found_p1.load(.acquire)) {
-                const mask = @as(Vec, @splat(0x00F0FFFF));
-                const check = (a & mask) == @as(Vec, @splat(0));
-                if (@reduce(.Or, check)) {
+                inline for (0..SIMD_WIDTH) |i| {
+                    M[w1][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w1 * 4]), .little);
+                }
+                if (w1 != w2) {
                     inline for (0..SIMD_WIDTH) |i| {
-                        if (check[i]) {
+                        M[w2][i] = std.mem.readInt(u32, @ptrCast(&buffers[i][w2 * 4]), .little);
+                    }
+                }
+
+                const a = md5TransformVec(M);
+
+                const mask5 = @as(Vec, @splat(0x00F0FFFF));
+                const check5 = (a & mask5) == @as(Vec, @splat(0));
+                if (@reduce(.Or, check5)) {
+                    inline for (0..SIMD_WIDTH) |i| {
+                        if (check5[i]) {
                             const n = chunk_start + offset + @as(u32, i);
                             _ = shared.result_p1.fetchMin(n, .monotonic);
                             shared.found_p1.store(true, .release);
-                        }
-                    }
-                }
-            }
 
-            if (!shared.found_p2.load(.acquire)) {
-                const mask = @as(Vec, @splat(0x00FFFFFF));
-                const check = (a & mask) == @as(Vec, @splat(0));
-                if (@reduce(.Or, check)) {
-                    inline for (0..SIMD_WIDTH) |i| {
-                        if (check[i]) {
-                            const n = chunk_start + offset + @as(u32, i);
-                            _ = shared.result_p2.fetchMin(n, .monotonic);
-                            shared.found_p2.store(true, .release);
+                            if ((a[i] & 0x00FFFFFF) == 0) {
+                                _ = shared.result_p2.fetchMin(n, .monotonic);
+                                shared.found_p2.store(true, .release);
+                            }
                         }
                     }
                 }
@@ -235,15 +475,16 @@ pub fn main() !void {
 }
 
 fn run_solve(shared: *Shared) !void {
-    const num_threads = @max(std.Thread.getCpuCount() catch 8, 1);
+    const num_threads = @max(std.Thread.getCpuCount() catch 12, 1);
     var threads: [32]std.Thread = undefined;
     const actual_threads = @min(num_threads, threads.len);
 
-    for (0..actual_threads) |i| {
+    for (0..actual_threads - 1) |i| {
         threads[i] = try std.Thread.spawn(.{}, workerThread, .{shared});
     }
+    workerThread(shared);
 
-    for (0..actual_threads) |i| {
+    for (0..actual_threads - 1) |i| {
         threads[i].join();
     }
 }

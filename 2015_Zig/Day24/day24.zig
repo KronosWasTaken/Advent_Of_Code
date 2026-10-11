@@ -1,85 +1,53 @@
 const std = @import("std");
-const State = struct {
-    weight: u32,
-    packages: u32, // Bitmask
-};
-fn combinations(packages: []const u32, groups: u32) u64 {
+
+inline fn solve(input: []const u8) struct { p1: u64, p2: u64 } {
     @setRuntimeSafety(false);
-    const target = blk: {
-        var sum: u32 = 0;
-        for (packages) |p| sum += p;
-        break :blk sum / groups;
-    };
-    var buffer: [200000]State = undefined;
-    var read_start: usize = 0;
-    var read_end: usize = 1;
-    var write_start: usize = 100000;
-    buffer[0] = .{ .weight = 0, .packages = 0 };
-    while (read_start < read_end) {
-        var write_end = write_start;
-        var r = read_start;
-        while (r < read_end) : (r += 1) {
-            const state = buffer[r];
-            const start = if (state.packages == 0) 0 else @as(usize, @intCast(32 - @clz(state.packages)));
-            var i = start;
-            while (i < packages.len) : (i += 1) {
-                const next_weight = state.weight + packages[i];
-                if (next_weight > target) break;
-                const next_packages = state.packages | (@as(u32, 1) << @intCast(i));
-                if (next_weight == target) {
-                    var qe: u64 = 1;
-                    var mask = next_packages;
-                    var idx: u5 = 0;
-                    while (mask != 0) {
-                        if ((mask & 1) != 0) {
-                            qe *= packages[idx];
-                        }
-                        mask >>= 1;
-                        idx += 1;
-                    }
-                    return qe;
-                }
-                buffer[write_end] = .{ .weight = next_weight, .packages = next_packages };
-                write_end += 1;
-            }
-        }
-        if (write_start == 100000) {
-            read_start = 100000;
-            read_end = write_end;
-            write_start = 0;
-        } else {
-            read_start = 0;
-            read_end = write_end;
-            write_start = 100000;
-        }
-    }
-    return 0;
-}
-fn solve(input: []const u8) struct { p1: u64, p2: u64 } {
-    var packages: [30]u32 = undefined;
+    var packages: [32]u32 = undefined;
     var count: usize = 0;
-    var num: u32 = 0;
-    var in_number = false;
-    for (input) |c| {
-        if (c >= '0' and c <= '9') {
-            num = num * 10 + (c - '0');
-            in_number = true;
-        } else if (in_number) {
-            packages[count] = num;
-            count += 1;
-            num = 0;
-            in_number = false;
+    var sum: usize = 0;
+
+    var i: usize = 0;
+    while (i < input.len) {
+        while (i < input.len and (input[i] < '0' or input[i] > '9')) : (i += 1) {}
+        if (i >= input.len) break;
+        var num: u32 = 0;
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            num = num * 10 + (input[i] - '0');
         }
-    }
-    if (in_number) {
         packages[count] = num;
+        sum += num;
         count += 1;
     }
-    std.mem.sort(u32, packages[0..count], {}, comptime std.sort.asc(u32));
-    const p1 = combinations(packages[0..count], 3);
-    const p2 = combinations(packages[0..count], 4);
-    return .{ .p1 = p1, .p2 = p2 };
+
+    const goal3 = sum / 3;
+    const goal4 = sum / 4;
+
+    var min_pkgs = [_]u32{std.math.maxInt(u32)} ** 600;
+    var min_qe = [_]u64{std.math.maxInt(u64)} ** 600;
+    min_pkgs[0] = 0;
+    min_qe[0] = 1;
+
+    for (packages[0..count]) |item| {
+        var w: usize = goal3;
+        while (w >= item) : (w -= 1) {
+            const prev_pkgs = min_pkgs[w - item];
+            if (prev_pkgs == std.math.maxInt(u32)) continue;
+            const take = prev_pkgs + 1;
+            const not_take = min_pkgs[w];
+            const take_qe = @as(u64, item) *| min_qe[w - item];
+
+            if (take < not_take) {
+                min_pkgs[w] = take;
+                min_qe[w] = take_qe;
+            } else if (take == not_take) {
+                if (take_qe < min_qe[w]) min_qe[w] = take_qe;
+            }
+        }
+    }
+
+    return .{ .p1 = min_qe[goal3], .p2 = min_qe[goal4] };
 }
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();

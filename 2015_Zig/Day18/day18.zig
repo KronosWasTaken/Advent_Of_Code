@@ -1,96 +1,122 @@
 const std = @import("std");
-const Lights = [100][7]u64;
-fn parse(input: []const u8) Lights {
-    var grid: Lights = std.mem.zeroes(Lights);
+
+const MASK: u64 = (@as(u64, 1) << 50) - 1;
+const LEFT_CORNER: u64 = @as(u64, 1) << 49;
+const RIGHT_CORNER: u64 = @as(u64, 1) << 0;
+
+const Vec2 = @Vector(2, u64);
+const Shift1: @Vector(2, u6) = @splat(1);
+const MASK_VEC: Vec2 = @splat(MASK);
+const CORNER_EVEN = Vec2{ 0, LEFT_CORNER };
+const CORNER_ODD = Vec2{ 0, RIGHT_CORNER };
+
+const RowVec = struct {
+    even: Vec2 = @splat(0),
+    odd: Vec2 = @splat(0),
+};
+
+inline fn halfAdder(a: Vec2, b: Vec2) struct { Vec2, Vec2 } {
+    return .{ a & b, a ^ b };
+}
+
+inline fn fullAdder(a: Vec2, b: Vec2, c: Vec2) struct { Vec2, Vec2 } {
+    return .{ (a & b) | (c & (a ^ b)), a ^ b ^ c };
+}
+
+inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
+    @setRuntimeSafety(false);
+    var grid: [101]RowVec = [_]RowVec{.{}} ** 101;
+
     var y: usize = 0;
     var x: usize = 0;
-    var idx: usize = 0;
-    while (idx < input.len) : (idx += 1) {
-        const c = input[idx];
+    var even: u64 = 0;
+    var odd: u64 = 0;
+
+    for (input) |c| {
         if (c == '#' or c == '.') {
             const bit: u64 = @intFromBool(c == '#');
-            const block = x / 16;
-            const offset: u6 = @intCast(4 * (15 - (x % 16)));
-            grid[y][block] |= bit << offset;
+            if ((x & 1) == 0) {
+                even = (even << 1) | bit;
+            } else {
+                odd = (odd << 1) | bit;
+            }
             x += 1;
-        } else if (c == '\n') {
-            if (x > 0) {
+            if (x == 100) {
+                grid[y] = .{
+                    .even = @splat(even),
+                    .odd = @splat(odd),
+                };
                 y += 1;
                 x = 0;
+                even = 0;
+                odd = 0;
             }
         }
     }
-    return grid;
-}
-fn gameOfLife(input: *const Lights, part_two: bool) u32 {
-    var grids: [2]Lights = undefined;
-    grids[0] = input.*;
-    var temp: Lights = undefined;
-    var current: u1 = 0;
-    var step: u32 = 0;
+
+    // Set corners for Part 2 initially
+    grid[0].even |= CORNER_EVEN;
+    grid[0].odd |= CORNER_ODD;
+    grid[99].even |= CORNER_EVEN;
+    grid[99].odd |= CORNER_ODD;
+
+    var grid2: [101]RowVec = [_]RowVec{.{}} ** 101;
+    var cur = &grid;
+    var nxt = &grid2;
+
+    var step: usize = 0;
     while (step < 100) : (step += 1) {
-        const grid = &grids[current];
-        const next = &grids[1 - current];
-        var y: usize = 0;
-        while (y < 100) : (y += 1) {
-            var x: usize = 0;
-            while (x < 7) : (x += 1) {
-                const cell = grid[y][x];
-                var sum = cell + (cell >> 4) + (cell << 4);
-                if (x > 0) {
-                    sum += grid[y][x - 1] << 60;
-                }
-                if (x < 6) {
-                    sum += grid[y][x + 1] >> 60;
-                }
-                temp[y][x] = sum;
-            }
+        var above = RowVec{};
+        var row = RowVec{};
+        var below = cur[0];
+
+        var gy: usize = 0;
+        while (gy < 100) : (gy += 1) {
+            above = row;
+            row = below;
+            below = cur[gy + 1];
+
+            // Even columns
+            const e_jk = fullAdder(above.odd, row.odd, below.odd);
+            const e_lm = halfAdder(above.even, below.even);
+            const e_n = e_jk[0] >> Shift1;
+            const e_o = e_jk[1] >> Shift1;
+
+            const e_pq = fullAdder(e_jk[0], e_lm[0], e_n);
+            const e_rs = fullAdder(e_jk[1], e_lm[1], e_o);
+            nxt[gy].even = (row.even | e_rs[1]) & (e_pq[1] ^ e_rs[0]) & ~e_pq[0] & MASK_VEC;
+
+            // Odd columns
+            const o_jk = fullAdder(above.even, row.even, below.even);
+            const o_lm = halfAdder(above.odd, below.odd);
+            const o_n = o_jk[0] << Shift1;
+            const o_o = o_jk[1] << Shift1;
+
+            const o_pq = fullAdder(o_jk[0], o_lm[0], o_n);
+            const o_rs = fullAdder(o_jk[1], o_lm[1], o_o);
+            nxt[gy].odd = (row.odd | o_rs[1]) & (o_pq[1] ^ o_rs[0]) & ~o_pq[0] & MASK_VEC;
         }
-        y = 0;
-        while (y < 100) : (y += 1) {
-            const has_above = y > 0;
-            const has_below = y < 99;
-            var x: usize = 0;
-            while (x < 7) : (x += 1) {
-                var sum = temp[y][x] - grid[y][x];
-                if (has_above) {
-                    sum += temp[y - 1][x];
-                }
-                if (has_below) {
-                    sum += temp[y + 1][x];
-                }
-                const a = sum >> 3;
-                const b = sum >> 2;
-                const c = sum >> 1;
-                const d = sum | grid[y][x];
-                next[y][x] = (~a & ~b & c & d) & 0x1111111111111111;
-            }
-            next[y][6] &= 0x1111000000000000;
-        }
-        if (part_two) {
-            next[0][0] |= 1 << 60;
-            next[0][6] |= 1 << 48;
-            next[99][0] |= 1 << 60;
-            next[99][6] |= 1 << 48;
-        }
-        current = 1 - current;
+
+        nxt[0].even |= CORNER_EVEN;
+        nxt[0].odd |= CORNER_ODD;
+        nxt[99].even |= CORNER_EVEN;
+        nxt[99].odd |= CORNER_ODD;
+
+        const tmp = cur;
+        cur = nxt;
+        nxt = tmp;
     }
-    var count: u32 = 0;
-    const final_grid = &grids[current];
-    for (final_grid) |row| {
-        for (row) |cell| {
-            count += @popCount(cell);
-        }
+
+    var count_p1: u32 = 0;
+    var count_p2: u32 = 0;
+    for (0..100) |gy| {
+        count_p1 += @popCount(cur[gy].even[0]) + @popCount(cur[gy].odd[0]);
+        count_p2 += @popCount(cur[gy].even[1]) + @popCount(cur[gy].odd[1]);
     }
-    return count;
+
+    return .{ .p1 = count_p1, .p2 = count_p2 };
 }
-fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
-    @setRuntimeSafety(false);
-    var grid = parse(input);
-    const p1 = gameOfLife(&grid, false);
-    const p2 = gameOfLife(&grid, true);
-    return .{ .p1 = p1, .p2 = p2 };
-}
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
     var timer = try std.time.Timer.start();

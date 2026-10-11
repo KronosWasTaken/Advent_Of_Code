@@ -2,78 +2,91 @@ const std = @import("std");
 inline fn solve(input: []const u8) struct { min: u32, max: u32 } {
     @setRuntimeSafety(false);
     var dist: [8][8]u16 = [_][8]u16{[_]u16{0} ** 8} ** 8;
-    var city_hash: [8]u64 = [_]u64{0} ** 8;
+    var city_tags = [_]u16{0} ** 8;
     var city_count: u8 = 0;
+
     var i: usize = 0;
     while (i < input.len) {
-        const start = i;
-        while (i < input.len and input[i] > 13) : (i += 1) {}
-        const line = input[start..i];
-        i += @intFromBool(i < input.len and input[i] == '\r');
-        i += @intFromBool(i < input.len and input[i] == '\n');
-        if (line.len == 0) break;
-        var to_pos: usize = 0;
-        while (line[to_pos] != ' ') : (to_pos += 1) {}
-        var eq_pos = to_pos + 4;
-        while (line[eq_pos] != ' ') : (eq_pos += 1) {}
-        const city_a = line[0..to_pos];
-        const city_b = line[to_pos + 4 .. eq_pos];
+        while (i < input.len and input[i] <= ' ') : (i += 1) {}
+        if (i >= input.len) break;
+
+        const tag_a: u16 = @as(u16, input[i]) | (@as(u16, input[i + 1]) << 8);
+        while (i < input.len and input[i] != ' ') : (i += 1) {}
+        i += 4; // skip " to "
+
+        const tag_b: u16 = @as(u16, input[i]) | (@as(u16, input[i + 1]) << 8);
+        while (i < input.len and input[i] != '=') : (i += 1) {}
+        i += 2; // skip "= "
+
         var d: u16 = 0;
-        var j = eq_pos + 3;
-        while (j < line.len) : (j += 1) d = d * 10 + (line[j] - '0');
-        const hash_a = std.hash.Wyhash.hash(0, city_a);
-        const hash_b = std.hash.Wyhash.hash(0, city_b);
-        var idx_a: u8 = 255;
-        var idx_b: u8 = 255;
-        for (0..city_count) |k| {
-            if (city_hash[k] == hash_a) idx_a = @intCast(k);
-            if (city_hash[k] == hash_b) idx_b = @intCast(k);
+        while (i < input.len and input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            d = d * 10 + (input[i] - '0');
         }
-        if (idx_a == 255) {
-            city_hash[city_count] = hash_a;
+
+        var idx_a: usize = 8;
+        var idx_b: usize = 8;
+        for (0..city_count) |k| {
+            if (city_tags[k] == tag_a) idx_a = k;
+            if (city_tags[k] == tag_b) idx_b = k;
+        }
+        if (idx_a == 8) {
+            city_tags[city_count] = tag_a;
             idx_a = city_count;
             city_count += 1;
         }
-        if (idx_b == 255) {
-            city_hash[city_count] = hash_b;
+        if (idx_b == 8) {
+            city_tags[city_count] = tag_b;
             idx_b = city_count;
             city_count += 1;
         }
+
         dist[idx_a][idx_b] = d;
         dist[idx_b][idx_a] = d;
     }
-    const n: usize = city_count;
-    const full_mask: u16 = (@as(u16, 1) << @intCast(n)) - 1;
-    var dp_min: [256][8]u16 = [_][8]u16{[_]u16{9999} ** 8} ** 256;
-    var dp_max: [256][8]u16 = [_][8]u16{[_]u16{0} ** 8} ** 256;
-    for (0..n) |city| {
-        dp_min[@as(u16, 1) << @intCast(city)][city] = 0;
-        dp_max[@as(u16, 1) << @intCast(city)][city] = 0;
+
+    var table_min: [256][8]u16 = [_][8]u16{[_]u16{9999} ** 8} ** 256;
+    var table_max: [256][8]u16 = [_][8]u16{[_]u16{0} ** 8} ** 256;
+
+    for (0..8) |k| {
+        table_min[@as(usize, 1) << @intCast(k)][k] = 0;
+        table_max[@as(usize, 1) << @intCast(k)][k] = 0;
     }
-    var mask: u16 = 1;
-    while (mask <= full_mask) : (mask += 1) {
-        for (0..n) |curr| {
-            if ((mask >> @intCast(curr)) & 1 == 0) continue;
-            const min_curr = dp_min[mask][curr];
-            if (min_curr == 9999) continue;
-            const max_curr = dp_max[mask][curr];
-            for (0..n) |next| {
-                if ((mask >> @intCast(next)) & 1 == 1) continue;
-                const new_mask = mask | (@as(u16, 1) << @intCast(next));
-                const d = dist[curr][next];
-                const new_min = min_curr + d;
-                const new_max = max_curr + d;
-                if (new_min < dp_min[new_mask][next]) dp_min[new_mask][next] = new_min;
-                if (new_max > dp_max[new_mask][next]) dp_max[new_mask][next] = new_max;
+
+    for (3..256) |set| {
+        if (@popCount(set) < 2) continue;
+
+        var k_bits = set;
+        while (k_bits != 0) {
+            const k = @ctz(k_bits);
+            k_bits &= k_bits - 1;
+            const subset = set ^ (@as(usize, 1) << @intCast(k));
+
+            var shortest: u16 = 9999;
+            var longest: u16 = 0;
+
+            var m_bits = subset;
+            while (m_bits != 0) {
+                const m = @ctz(m_bits);
+                m_bits &= m_bits - 1;
+                const d = dist[m][k];
+                const s = table_min[subset][m] + d;
+                const l = table_max[subset][m] + d;
+                if (s < shortest) shortest = s;
+                if (l > longest) longest = l;
             }
+
+            table_min[set][k] = shortest;
+            table_max[set][k] = longest;
         }
     }
+
     var min_dist: u32 = 9999;
     var max_dist: u32 = 0;
-    for (0..n) |city| {
-        if (dp_min[full_mask][city] < min_dist) min_dist = dp_min[full_mask][city];
-        if (dp_max[full_mask][city] > max_dist) max_dist = dp_max[full_mask][city];
+    for (0..8) |k| {
+        min_dist = @min(min_dist, table_min[255][k]);
+        max_dist = @max(max_dist, table_max[255][k]);
     }
+
     return .{ .min = min_dist, .max = max_dist };
 }
 pub fn main() !void {

@@ -1,92 +1,103 @@
 const std = @import("std");
-fn parse(input: []const u8, alloc: std.mem.Allocator) !struct { edge: [16][16]i16, n: u8 } {
+
+inline fn solve(input: []const u8) struct { p1: i16, p2: i16 } {
     @setRuntimeSafety(false);
-    var map = std.StringHashMap(u8).init(alloc);
-    defer map.deinit();
-    var hap: [16][16]i16 = [_][16]i16{[_]i16{0} ** 16} ** 16;
+    var map = [_]u8{0xFF} ** 26;
     var cnt: u8 = 0;
-    var lines = std.mem.tokenizeAny(u8, input, "\r\n");
-    while (lines.next()) |line| {
-        var it = std.mem.tokenizeScalar(u8, line, ' ');
-        const p1_name = it.next() orelse continue;
-        _ = it.next(); // "would"
-        const sign_str = it.next().?;
-        const val_str = it.next().?;
-        _ = it.next(); // "happiness"
-        _ = it.next(); // "units"
-        _ = it.next(); // "by"
-        _ = it.next(); // "sitting"
-        _ = it.next(); // "next"
-        _ = it.next(); // "to"
-        var p2_name = it.next().?;
-        p2_name = p2_name[0..p2_name.len - 1]; // Remove '.'
-        const p1_res = try map.getOrPut(p1_name);
-        if (!p1_res.found_existing) {
-            p1_res.value_ptr.* = cnt;
+    var hap: [8][8]i16 = [_][8]i16{[_]i16{0} ** 8} ** 8;
+
+    var i: usize = 0;
+    while (i < input.len) {
+        if (input[i] < 'A' or input[i] > 'Z') {
+            i += 1;
+            continue;
+        }
+        const u_char = input[i];
+        var u = map[u_char - 'A'];
+        if (u == 0xFF) {
+            u = cnt;
+            map[u_char - 'A'] = cnt;
             cnt += 1;
         }
-        const p2_res = try map.getOrPut(p2_name);
-        if (!p2_res.found_existing) {
-            p2_res.value_ptr.* = cnt;
+
+        while (input[i] != ' ') : (i += 1) {}
+        i += 7; // skip ' ' and "would "
+        const sign: i16 = if (input[i] == 'g') 1 else -1;
+        while (input[i] < '0' or input[i] > '9') : (i += 1) {}
+        var val: i16 = 0;
+        while (input[i] >= '0' and input[i] <= '9') : (i += 1) {
+            val = val * 10 + @as(i16, input[i] - '0');
+        }
+
+        while (input[i] != '.') : (i += 1) {}
+        var v_end = i;
+        while (input[v_end - 1] != ' ') : (v_end -= 1) {}
+        const v_char = input[v_end];
+        var v = map[v_char - 'A'];
+        if (v == 0xFF) {
+            v = cnt;
+            map[v_char - 'A'] = cnt;
             cnt += 1;
         }
-        const val = try std.fmt.parseInt(i16, val_str, 10);
-        const sign: i16 = if (sign_str[0] == 'g') 1 else -1;
-        hap[p1_res.value_ptr.*][p2_res.value_ptr.*] = sign * val;
+
+        hap[u][v] += sign * val;
+        hap[v][u] += sign * val;
+        while (i < input.len and input[i] != '\n') : (i += 1) {}
     }
-    var edge: [16][16]i16 = [_][16]i16{[_]i16{0} ** 16} ** 16;
-    var a: u8 = 0;
-    while (a < cnt) : (a += 1) {
-        var b: u8 = 0;
-        while (b < cnt) : (b += 1) {
-            edge[a][b] = hap[a][b] + hap[b][a];
+
+    const Entry = struct { dist: i16, start: u8 };
+    var table: [256][8]Entry = undefined;
+    for (0..8) |k| {
+        table[@as(usize, 1) << @as(u3, @intCast(k))][k] = .{ .dist = 0, .start = @as(u8, @intCast(k)) };
+    }
+
+    for (3..256) |set| {
+        if ((set & (set - 1)) == 0) continue;
+
+        var k_bits = set;
+        while (k_bits != 0) {
+            const k = @ctz(k_bits);
+            k_bits &= k_bits - 1;
+
+            const subset = set ^ (@as(usize, 1) << @as(u3, @intCast(k)));
+            var longest: i16 = -30000;
+            var start_node: u8 = 0;
+
+            var m_bits = subset;
+            while (m_bits != 0) {
+                const m = @ctz(m_bits);
+                m_bits &= m_bits - 1;
+
+                const prior = table[subset][m];
+                const d = prior.dist + hap[m][k];
+                if (d > longest) {
+                    longest = d;
+                    start_node = prior.start;
+                }
+            }
+            table[set][k] = .{ .dist = longest, .start = start_node };
         }
     }
-    return .{ .edge = edge, .n = cnt };
-}
-fn permute(perm: []u8, used: u16, pos: u8, n: u8, edge: *const [16][16]i16, best: *i32, sum: i32) void {
-    @setRuntimeSafety(false);
-    if (pos == n) {
-        const total = sum + edge[perm[n - 1]][perm[0]];
-        if (total > best.*) best.* = total;
-        return;
+
+    var p1: i16 = -30000;
+    var p2: i16 = -30000;
+    for (0..8) |k| {
+        const entry = table[255][k];
+        const loop_d = entry.dist + hap[entry.start][k];
+        if (loop_d > p1) p1 = loop_d;
+        if (entry.dist > p2) p2 = entry.dist;
     }
-    if (pos == 0) {
-        perm[0] = 0;
-        permute(perm, 1, 1, n, edge, best, 0);
-        return;
-    }
-    const prev = perm[pos - 1];
-    const start: u8 = 1;
-    const end: u8 = if (pos == 1 and n > 2) (n / 2 + 1) else n;
-    var i: u8 = start;
-    while (i < end) : (i += 1) {
-        const mask: u16 = @as(u16, 1) << @intCast(i);
-        if (used & mask == 0) {
-            perm[pos] = i;
-            permute(perm, used | mask, pos + 1, n, edge, best, sum + edge[prev][i]);
-        }
-    }
+
+    return .{ .p1 = p1, .p2 = p2 };
 }
-fn solvePart(edge: *const [16][16]i16, n: u8) i32 {
-    @setRuntimeSafety(false);
-    var perm: [16]u8 = undefined;
-    var best: i32 = -999999;
-    permute(&perm, 0, 0, n, edge, &best, 0);
-    return best;
-}
+
 pub fn main() !void {
     const input = @embedFile("input.txt");
-    var buf: [1024]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const alloc = fba.allocator();
     var timer = try std.time.Timer.start();
     const start = timer.read();
-    const parsed = try parse(input, alloc);
-    const p1 = solvePart(&parsed.edge, parsed.n);
-    const p2 = solvePart(&parsed.edge, parsed.n + 1);
+    const result = solve(input);
     const elapsed_ns = timer.read() - start;
     const elapsed_us = @as(f64, @floatFromInt(elapsed_ns)) / 1000.0;
-    std.debug.print("Part 1: {} | Part 2: {}\n", .{ p1, p2 });
+    std.debug.print("Part 1: {} | Part 2: {}\n", .{ result.p1, result.p2 });
     std.debug.print("Time: {d:.2} microseconds\n", .{elapsed_us});
 }
