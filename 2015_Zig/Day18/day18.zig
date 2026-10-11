@@ -4,28 +4,35 @@ const MASK: u64 = (@as(u64, 1) << 50) - 1;
 const LEFT_CORNER: u64 = @as(u64, 1) << 49;
 const RIGHT_CORNER: u64 = @as(u64, 1) << 0;
 
-const Vec2 = @Vector(2, u64);
-const Shift1: @Vector(2, u6) = @splat(1);
-const MASK_VEC: Vec2 = @splat(MASK);
-const CORNER_EVEN = Vec2{ 0, LEFT_CORNER };
-const CORNER_ODD = Vec2{ 0, RIGHT_CORNER };
+// Lanes: 0 = even columns (part 1), 1 = even columns (part 2),
+// 2 = odd columns (part 1), 3 = odd columns (part 2).
+const Row = @Vector(4, u64);
+const Shift1: @Vector(4, u6) = @splat(1);
+const MASK_VEC: Row = @splat(MASK);
+const CORNER: Row = .{ 0, LEFT_CORNER, 0, RIGHT_CORNER };
+const EVEN_LANES: @Vector(4, bool) = .{ true, true, false, false };
+const SWAP_PARITY = [4]i32{ 2, 3, 0, 1 };
 
-const RowVec = struct {
-    even: Vec2 = @splat(0),
-    odd: Vec2 = @splat(0),
-};
-
-inline fn halfAdder(a: Vec2, b: Vec2) struct { Vec2, Vec2 } {
+inline fn halfAdder(a: Row, b: Row) struct { Row, Row } {
     return .{ a & b, a ^ b };
 }
 
-inline fn fullAdder(a: Vec2, b: Vec2, c: Vec2) struct { Vec2, Vec2 } {
+inline fn fullAdder(a: Row, b: Row, c: Row) struct { Row, Row } {
     return .{ (a & b) | (c & (a ^ b)), a ^ b ^ c };
+}
+
+// Every column's neighbours have the other parity, so the other parity's word is put in each half.
+inline fn swapParity(v: Row) Row {
+    return @shuffle(u64, v, undefined, SWAP_PARITY);
+}
+
+inline fn toNeighbour(v: Row) Row {
+    return @select(u64, EVEN_LANES, v >> Shift1, v << Shift1);
 }
 
 inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
-    var grid: [101]RowVec = [_]RowVec{.{}} ** 101;
+    var grid: [101]Row = [_]Row{@splat(0)} ** 101;
 
     var y: usize = 0;
     var x: usize = 0;
@@ -33,41 +40,34 @@ inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     var odd: u64 = 0;
 
     for (input) |c| {
-        if (c == '#' or c == '.') {
-            const bit: u64 = @intFromBool(c == '#');
-            if ((x & 1) == 0) {
-                even = (even << 1) | bit;
-            } else {
-                odd = (odd << 1) | bit;
-            }
-            x += 1;
-            if (x == 100) {
-                grid[y] = .{
-                    .even = @splat(even),
-                    .odd = @splat(odd),
-                };
-                y += 1;
-                x = 0;
-                even = 0;
-                odd = 0;
-            }
+        const cell: usize = @intFromBool(c == '#' or c == '.');
+        const bit: u64 = @intFromBool(c == '#');
+        const is_odd: u64 = x & 1;
+        // Column x is bit 49 - x / 2 of its parity word, so each word holds its columns from the left.
+        const shift: u6 = @intCast(49 - (x >> 1));
+        even |= (bit & (1 - is_odd)) << shift;
+        odd |= (bit & is_odd) << shift;
+        x += cell;
+        if (x == 100) {
+            grid[y] = .{ even, even, odd, odd };
+            y += 1;
+            x = 0;
+            even = 0;
+            odd = 0;
         }
     }
 
-    // Set corners for Part 2 initially
-    grid[0].even |= CORNER_EVEN;
-    grid[0].odd |= CORNER_ODD;
-    grid[99].even |= CORNER_EVEN;
-    grid[99].odd |= CORNER_ODD;
+    grid[0] |= CORNER;
+    grid[99] |= CORNER;
 
-    var grid2: [101]RowVec = [_]RowVec{.{}} ** 101;
+    var grid2: [101]Row = [_]Row{@splat(0)} ** 101;
     var cur = &grid;
     var nxt = &grid2;
 
     var step: usize = 0;
     while (step < 100) : (step += 1) {
-        var above = RowVec{};
-        var row = RowVec{};
+        var above: Row = @splat(0);
+        var row: Row = @splat(0);
         var below = cur[0];
 
         var gy: usize = 0;
@@ -76,31 +76,18 @@ inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
             row = below;
             below = cur[gy + 1];
 
-            // Even columns
-            const e_jk = fullAdder(above.odd, row.odd, below.odd);
-            const e_lm = halfAdder(above.even, below.even);
-            const e_n = e_jk[0] >> Shift1;
-            const e_o = e_jk[1] >> Shift1;
+            const jk = fullAdder(swapParity(above), swapParity(row), swapParity(below));
+            const lm = halfAdder(above, below);
+            const n = toNeighbour(jk[0]);
+            const o = toNeighbour(jk[1]);
 
-            const e_pq = fullAdder(e_jk[0], e_lm[0], e_n);
-            const e_rs = fullAdder(e_jk[1], e_lm[1], e_o);
-            nxt[gy].even = (row.even | e_rs[1]) & (e_pq[1] ^ e_rs[0]) & ~e_pq[0] & MASK_VEC;
-
-            // Odd columns
-            const o_jk = fullAdder(above.even, row.even, below.even);
-            const o_lm = halfAdder(above.odd, below.odd);
-            const o_n = o_jk[0] << Shift1;
-            const o_o = o_jk[1] << Shift1;
-
-            const o_pq = fullAdder(o_jk[0], o_lm[0], o_n);
-            const o_rs = fullAdder(o_jk[1], o_lm[1], o_o);
-            nxt[gy].odd = (row.odd | o_rs[1]) & (o_pq[1] ^ o_rs[0]) & ~o_pq[0] & MASK_VEC;
+            const pq = fullAdder(jk[0], lm[0], n);
+            const rs = fullAdder(jk[1], lm[1], o);
+            nxt[gy] = (row | rs[1]) & (pq[1] ^ rs[0]) & ~pq[0] & MASK_VEC;
         }
 
-        nxt[0].even |= CORNER_EVEN;
-        nxt[0].odd |= CORNER_ODD;
-        nxt[99].even |= CORNER_EVEN;
-        nxt[99].odd |= CORNER_ODD;
+        nxt[0] |= CORNER;
+        nxt[99] |= CORNER;
 
         const tmp = cur;
         cur = nxt;
@@ -110,8 +97,8 @@ inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     var count_p1: u32 = 0;
     var count_p2: u32 = 0;
     for (0..100) |gy| {
-        count_p1 += @popCount(cur[gy].even[0]) + @popCount(cur[gy].odd[0]);
-        count_p2 += @popCount(cur[gy].even[1]) + @popCount(cur[gy].odd[1]);
+        count_p1 += @popCount(cur[gy][0]) + @popCount(cur[gy][2]);
+        count_p2 += @popCount(cur[gy][1]) + @popCount(cur[gy][3]);
     }
 
     return .{ .p1 = count_p1, .p2 = count_p2 };

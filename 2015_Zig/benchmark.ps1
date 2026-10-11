@@ -19,6 +19,12 @@ if (-not $zig) {
     if ($cmd) { $zig = $cmd.Source } else { $zig = "zig" }
 }
 
+# Best CPU reference time seen so far, read before this run rewrites benchmark.md.
+$cpuBestStored = $null
+if (Test-Path $benchPath) {
+    if ([IO.File]::ReadAllText($benchPath) -match '\| Day 04 \(CPU\) \| ([0-9.]+)') { $cpuBestStored = [double]$Matches[1] }
+}
+
 $existing = @{}
 if (Test-Path $benchPath) {
     $content = [System.IO.File]::ReadAllText($benchPath, [System.Text.Encoding]::UTF8)
@@ -165,3 +171,23 @@ $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 [System.IO.File]::WriteAllText($benchPath, ($lines -join "`n") + "`n", $utf8NoBom)
 
 Write-Host "`n[$year Benchmark Updated] Total: $($total.ToString('F2')) $us ($(($total / 1000.0).ToString('F2')) ms)" -ForegroundColor Cyan
+
+# CPU reference for Day 04: timed for comparison only and never added to the total above.
+$cpuSrc = Join-Path $currentDir "Day04\day04_cpu.zig"
+if (Test-Path $cpuSrc) {
+    $cpuExe = Join-Path $currentDir "Day04\day04_cpu.exe"
+    & $zig build-exe -O ReleaseFast -mcpu=native $cpuSrc --name day04_cpu "-femit-bin=$cpuExe" | Out-Null
+    Push-Location (Join-Path $currentDir "Day04")
+    $cpuTimes = @()
+    for ($i = 0; $i -lt 5; $i++) {
+        $cpuOut = (& $cpuExe 2>&1 | Out-String)
+        if ($cpuOut -match 'Time: ([0-9.]+)') { $cpuTimes += [double]$matches[1] }
+    }
+    Pop-Location
+    if ($cpuTimes.Count -gt 0) {
+        $cpuBest = (@($cpuTimes) + @($cpuBestStored) | Where-Object { $_ -ne $null } | Measure-Object -Minimum).Minimum
+        $extra = @("", "---", "", "### CPU reference (not included in the total)", "", "| Day | Time ($us) |", "| :--- | :--- |", ("| Day 04 (CPU) | {0:F2} $us |" -f $cpuBest))
+        [System.IO.File]::AppendAllText($benchPath, ($extra -join "`n") + "`n", $utf8NoBom)
+        Write-Host ("Day 04 CPU reference: {0:F2} $us (not in total)" -f $cpuBest) -ForegroundColor DarkGray
+    }
+}

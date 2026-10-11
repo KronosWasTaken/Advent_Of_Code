@@ -1,67 +1,99 @@
 const std = @import("std");
-const target = [_]i8{ 3, 7, 2, 3, 0, 0, 5, 3, 2, 1 };
-inline fn getAttrIdx(first: u8, len: u8) u8 {
-    return switch (first) {
-        'c' => if (len == 8) 0 else if (len == 4) 8 else 1, // children(8), cars(4), cats(4)
-        's' => 2, // samoyeds
-        'p' => if (len == 11) 3 else 9, // pomeranians(11), perfumes(8)
-        'a' => 4, // akitas
-        'v' => 5, // vizslas
-        'g' => 6, // goldfish
-        't' => 7, // trees
-        else => 255,
-    };
+
+const Vec = @Vector(16, u8);
+
+const Cmp = enum { eq, gt, lt };
+
+const attr_names = [_][]const u8{ "children", "cats", "samoyeds", "pomeranians", "akitas", "vizslas", "goldfish", "trees", "cars", "perfumes" };
+const attr_target = [_]u8{ 3, 7, 2, 3, 0, 0, 5, 3, 2, 1 };
+const attr_cmp = [_]Cmp{ .eq, .gt, .eq, .lt, .eq, .eq, .lt, .gt, .eq, .eq };
+
+// Bit 0 is set when the value matches for part 1, bit 1 when it matches for part 2.
+const attr_ok = blk: {
+    @setEvalBranchQuota(10_000);
+    var t: [attr_names.len * 100]u8 = undefined;
+    for (attr_target, attr_cmp, 0..) |target, cmp, attr| {
+        for (0..100) |val| {
+            const p1 = val == target;
+            const p2 = switch (cmp) {
+                .eq => val == target,
+                .gt => val > target,
+                .lt => val < target,
+            };
+            t[attr * 100 + val] = @intFromBool(p1) | (@as(u8, @intFromBool(p2)) << 1);
+        }
+    }
+    break :blk t;
+};
+
+inline fn key3(a: u8, b: u8, c: u8) usize {
+    return (@as(usize, a - 'a') * 26 + (b - 'a')) * 26 + (c - 'a');
 }
+
+// The last three letters of every attribute name are unique.
+const attr_by_key = blk: {
+    @setEvalBranchQuota(10_000);
+    var t = [_]u8{0} ** (26 * 26 * 26);
+    for (attr_names, 0..) |name, attr| {
+        t[key3(name[name.len - 3], name[name.len - 2], name[name.len - 1])] = attr;
+    }
+    break :blk t;
+};
+
 fn solve(input: []const u8) struct { p1: u16, p2: u16 } {
     @setRuntimeSafety(false);
+    // Each line has one "Sue N:" colon and three attribute colons, so the colons of every
+    // line are consecutive in this list. 512 lines of input is the most this buffer holds.
+    var colons: [4 * 512]u16 = undefined;
+    var colon_count: usize = 0;
+
+    // Zero padding past the last line lets the 64-byte block loads below stay in bounds.
+    const len = input.len - 64;
+    var block: usize = 0;
+    while (block < len) : (block += 64) {
+        var mask: u64 = 0;
+        inline for (0..4) |q| {
+            const chunk: Vec = input[block + 16 * q ..][0..16].*;
+            mask |= @as(u64, @as(u16, @bitCast(chunk == @as(Vec, @splat(':'))))) << (16 * q);
+        }
+        while (mask != 0) : (mask &= mask - 1) {
+            colons[colon_count] = @intCast(block + @ctz(mask));
+            colon_count += 1;
+        }
+    }
+
     var p1: u16 = 0;
     var p2: u16 = 0;
-    var idx: usize = 0;
-    while (idx < input.len) {
-        idx += 4;
-        var sue_num: u16 = input[idx] - '0';
-        idx += 1;
-        if (input[idx] != ':') {
-            sue_num = sue_num * 10 + (input[idx] - '0');
-            idx += 1;
-            if (input[idx] != ':') {
-                sue_num = sue_num * 10 + (input[idx] - '0');
-                idx += 1;
-            }
+    var c: usize = 0;
+    while (c + 4 <= colon_count) : (c += 4) {
+        const sue_colon = colons[c];
+        var sue_num: u16 = 0;
+        var scale: u16 = 1;
+        var p = sue_colon;
+        while (input[p - 1] >= '0' and input[p - 1] <= '9') : (p -= 1) {
+            sue_num += (input[p - 1] - '0') * scale;
+            scale *= 10;
         }
-        idx += 2; // Skip ": "
-        var match_p1: u8 = 1;
-        var match_p2: u8 = 1;
-        comptime var attr_count: u8 = 0;
-        inline while (attr_count < 3) : (attr_count += 1) {
-            const start = idx;
-            while (input[idx] != ':') : (idx += 1) {}
-            const attr_len = @as(u8, @intCast(idx - start));
-            const first_char = input[start];
-            idx += 2; // Skip ": "
-            var val: i8 = @as(i8, @intCast(input[idx] - '0'));
-            idx += 1;
-            if (input[idx] >= '0' and input[idx] <= '9') {
-                val = val * 10 + @as(i8, @intCast(input[idx] - '0'));
-                idx += 1;
-            }
-            const i = getAttrIdx(first_char, attr_len);
-            const tgt = target[i];
-            match_p1 &= @intFromBool(val == tgt);
-            const is_gt = (i == 1 or i == 7); // cats, trees
-            const is_lt = (i == 3 or i == 6); // pomeranians, goldfish
-            const p2_match = if (is_gt) (val > tgt) else if (is_lt) (val < tgt) else (val == tgt);
-            match_p2 &= @intFromBool(p2_match);
-            if (idx < input.len and input[idx] == ',') idx += 2;
+
+        var matches: u8 = 3;
+        inline for (1..4) |attr_num| {
+            const colon = colons[c + attr_num];
+            const attr = attr_by_key[key3(input[colon - 3], input[colon - 2], input[colon - 1])];
+            const d0 = input[colon + 2] - '0';
+            const d1 = input[colon + 3] -% '0';
+            const two_digits = d1 < 10;
+            const val: u8 = if (two_digits) d0 * 10 + d1 else d0;
+            matches &= attr_ok[@as(usize, attr) * 100 + val];
         }
-        if (match_p1 != 0) p1 = sue_num;
-        if (match_p2 != 0) p2 = sue_num;
-        while (idx < input.len and (input[idx] == '\r' or input[idx] == '\n')) : (idx += 1) {}
+
+        if (matches & 1 != 0) p1 = sue_num;
+        if (matches & 2 != 0) p2 = sue_num;
     }
     return .{ .p1 = p1, .p2 = p2 };
 }
+
 pub fn main() !void {
-    const input = @embedFile("input.txt");
+    const input = @embedFile("input.txt") ++ [_]u8{0} ** 64;
     var timer = try std.time.Timer.start();
     const start = timer.read();
     const result = solve(input);

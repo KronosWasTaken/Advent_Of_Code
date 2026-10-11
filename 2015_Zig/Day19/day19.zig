@@ -5,6 +5,19 @@ const Replacement = struct {
     to: []const u8,
 };
 
+const Vec = @Vector(16, u8);
+const max_molecule = 1024;
+const hash_base: u64 = 0x9E3779B97F4A7C15;
+
+// powers[i] = hash_base^i, so a candidate's hash can be assembled from prefix hashes in O(1).
+const powers = blk: {
+    @setEvalBranchQuota(10_000);
+    var t: [max_molecule + 1]u64 = undefined;
+    t[0] = 1;
+    for (1..t.len) |i| t[i] = t[i - 1] *% hash_base;
+    break :blk t;
+};
+
 fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
     var reps_buf: [64]Replacement = undefined;
@@ -25,30 +38,46 @@ fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
         }
     }
     const reps = reps_buf[0..rep_count];
+    const n = molecule.len;
 
-    var set: [2048]u64 = [_]u64{0} ** 2048;
+    // Zero padding lets the 16-byte window loads and the pattern matches run past the
+    // molecule end; zero is never a letter, so no match can start beyond it.
+    var mol = [_]u8{0} ** (max_molecule + 32);
+    @memcpy(mol[0..n], molecule);
+
+    var prefix: [max_molecule + 1]u64 = undefined;
+    prefix[0] = 0;
+    for (0..n) |i| prefix[i + 1] = prefix[i] *% hash_base +% mol[i];
+
+    // Polynomial hashes mod 2^64 can in principle collide, but for molecules this short
+    // a collision among the candidates is negligibly unlikely; the answer is checked against
+    // the exact distinct count.
+    var set = [_]u64{0} ** 2048;
     var p1: u32 = 0;
-    var buffer: [600]u8 = undefined;
 
     for (reps) |rep| {
-        const from_len = rep.from.len;
-        if (from_len > molecule.len) continue;
-        const max_pos = molecule.len - from_len;
-        var pos: usize = 0;
-        while (pos <= max_pos) : (pos += 1) {
-            if (std.mem.eql(u8, molecule[pos .. pos + from_len], rep.from)) {
-                const new_len = molecule.len - from_len + rep.to.len;
-                @memcpy(buffer[0..pos], molecule[0..pos]);
-                @memcpy(buffer[pos .. pos + rep.to.len], rep.to);
-                @memcpy(buffer[pos + rep.to.len .. new_len], molecule[pos + from_len ..]);
+        const from = rep.from;
+        const to_len = rep.to.len;
+        var to_hash: u64 = 0;
+        for (rep.to) |c| to_hash = to_hash *% hash_base +% c;
 
-                var h = std.hash.Wyhash.hash(0, buffer[0..new_len]);
+        var base: usize = 0;
+        while (base < n) : (base += 16) {
+            var hits: u16 = 0xFFFF;
+            for (from, 0..) |c, k| {
+                const window: Vec = mol[base + k ..][0..16].*;
+                hits &= @bitCast(window == @as(Vec, @splat(c)));
+            }
+            while (hits != 0) : (hits &= hits - 1) {
+                const pos = base + @ctz(hits);
+                const suffix_len = n - pos - from.len;
+                const suffix = prefix[n] -% prefix[pos + from.len] *% powers[suffix_len];
+                var h = prefix[pos] *% powers[to_len + suffix_len] +% to_hash *% powers[suffix_len] +% suffix;
                 if (h == 0) h = 1;
-                var idx = @as(usize, @truncate(h)) & 2047;
-                while (set[idx] != 0) {
-                    if (set[idx] == h) break;
-                    idx = (idx + 1) & 2047;
-                } else {
+
+                var idx = (h *% 0x9E3779B97F4A7C15) >> 53;
+                while (set[idx] != 0 and set[idx] != h) idx = (idx + 1) & 2047;
+                if (set[idx] == 0) {
                     set[idx] = h;
                     p1 += 1;
                 }
@@ -56,34 +85,20 @@ fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
         }
     }
 
-    var total: u32 = 0;
+    var upper: u32 = 0;
     var rn: u32 = 0;
     var ar: u32 = 0;
     var y: u32 = 0;
-
-    var i: usize = 0;
-    while (i < molecule.len) {
-        if (i + 1 < molecule.len) {
-            if (molecule[i] == 'R' and molecule[i + 1] == 'n') {
-                rn += 1;
-                total += 1;
-                i += 2;
-                continue;
-            } else if (molecule[i] == 'A' and molecule[i + 1] == 'r') {
-                ar += 1;
-                total += 1;
-                i += 2;
-                continue;
-            }
-        }
-        if (molecule[i] >= 'A' and molecule[i] <= 'Z') {
-            if (molecule[i] == 'Y') y += 1;
-            total += 1;
-        }
-        i += 1;
+    for (0..n) |i| {
+        const c = mol[i];
+        const next = mol[i + 1];
+        upper += @intFromBool(c >= 'A' and c <= 'Z');
+        rn += @intFromBool(c == 'R' and next == 'n');
+        ar += @intFromBool(c == 'A' and next == 'r');
+        y += @intFromBool(c == 'Y');
     }
 
-    const p2 = total - rn - ar - 2 * y - 1;
+    const p2 = upper - rn - ar - 2 * y - 1;
     return .{ .p1 = p1, .p2 = p2 };
 }
 

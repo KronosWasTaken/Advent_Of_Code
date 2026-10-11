@@ -28,7 +28,7 @@ The following table summarizes total execution times for all 25 days of each yea
 
 | Year | Execution Time (Total) | Benchmark Documentation |
 | :--- | :--- | :--- |
-| 2015 | 12.73 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
+| 2015 | 1.83 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
 | 2016 | 135.84 ms | [2016_Zig/benchmark.md](2016_Zig/benchmark.md) |
 | 2017 | 114.94 ms | [2017_Zig/benchmark.md](2017_Zig/benchmark.md) |
 | 2018 | 92.86 ms | [2018_Zig/benchmark.md](2018_Zig/benchmark.md) |
@@ -37,9 +37,9 @@ The following table summarizes total execution times for all 25 days of each yea
 | 2021 | 17.13 ms | [2021_Zig/benchmark.md](2021_Zig/benchmark.md) |
 | 2022 | 7.86 ms | [2022_Zig/benchmark.md](2022_Zig/benchmark.md) |
 | 2023 | 11.52 ms | [2023_Zig/benchmark.md](2023_Zig/benchmark.md) |
-| 2024 | 21.59 ms | [2024_Zig/benchmark.md](2024_Zig/benchmark.md) |
+| 2024 | 21.57 ms | [2024_Zig/benchmark.md](2024_Zig/benchmark.md) |
 | 2025 | 8.93 ms | [2025_Zig/benchmark.md](2025_Zig/benchmark.md) |
-| **Total** | **883.37 ms (0.88 s)** | |
+| **Total** | **872.46 ms (0.87 s)** | |
 
 ---
 
@@ -49,7 +49,9 @@ Benchmarks for 2015-2025 were collected on the following system:
 
 - OS: Windows 25H2 (Build 26200.7840)
 - CPU: AMD Ryzen 5 6600H with Radeon Graphics
-- GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM)
+- Laptop: Lenovo IdeaPad Gaming 3 15ARH7
+- GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM, driver 617.42, power limit 85 W in gaming mode)
+- GPU clock for the Day 04 GPU benchmark: locked at 2160 MHz, with a +200 MHz core offset in MSI Afterburner
 - RAM: 16 GB
 - Storage: Kingston SNV2S1000G SSD (1 TB), JMicron PCIe SSD (512 GB)
 - Zig: 0.15.2

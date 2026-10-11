@@ -1,66 +1,45 @@
 const std = @import("std");
 
+const Vec = @Vector(16, u8);
+const Pairs = @Vector(16, u16);
+
+inline fn eqChar(v: Vec, c: u8) @Vector(16, bool) {
+    return v == @as(Vec, @splat(c));
+}
+
 inline fn solve(data: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
-    const VOWEL_MASK: u32 = 0x0104111;
-    const FORBIDDEN_MASK: u32 = 0x101000a;
-
     var count1: u32 = 0;
     var count2: u32 = 0;
-    var pairs = [_]u32{0} ** 729;
+    var pos: usize = 0;
 
-    var line_idx: u32 = 1;
-    var base_offset: usize = 0;
+    while (pos + 16 <= data.len) {
+        const line: Vec = data[pos..][0..16].*;
+        pos += 16;
+        while (pos < data.len and (data[pos] == '\r' or data[pos] == '\n')) : (pos += 1) {}
 
-    while (base_offset + 16 <= data.len) {
-        if (data[base_offset] < 'a' or data[base_offset] > 'z') {
-            base_offset += 1;
-            continue;
+        // Lane 15 of the shifted vectors is filled with 0, which never matches a letter.
+        const next1 = std.simd.shiftElementsLeft(line, 1, 0);
+        const next2 = std.simd.shiftElementsLeft(line, 2, 0);
+
+        const vowels = eqChar(line, 'a') | eqChar(line, 'e') | eqChar(line, 'i') | eqChar(line, 'o') | eqChar(line, 'u');
+        const forbidden_first = eqChar(line, 'a') | eqChar(line, 'c') | eqChar(line, 'p') | eqChar(line, 'x');
+        const forbidden = (next1 -% line == @as(Vec, @splat(1))) & forbidden_first;
+        const has_double = line == next1;
+        const letter_gap = line == next2;
+
+        const nice1 = !@reduce(.Or, forbidden) and @popCount(@as(u16, @bitCast(vowels))) >= 3 and @reduce(.Or, has_double);
+        count1 += @intFromBool(nice1);
+
+        // A pair occurring at distance k >= 2 is an occurrence that does not overlap it.
+        const pairs = @as(Pairs, line) * @as(Pairs, @splat(256)) + @as(Pairs, next1);
+        var pair_repeat: @Vector(16, bool) = @splat(false);
+        inline for (2..16) |k| {
+            const ahead = std.simd.shiftElementsLeft(pairs, k, 0xFFFF);
+            pair_repeat |= pairs == ahead;
         }
-        const line = data[base_offset .. base_offset + 16];
-        base_offset += 16;
-        while (base_offset < data.len and (data[base_offset] == '\r' or data[base_offset] == '\n')) : (base_offset += 1) {}
-
-        var vowels: u32 = 0;
-        var has_double: bool = false;
-        var prev_mask: u32 = 0;
-        var nice1 = true;
-
-        var first: u32 = 0;
-        var second: u32 = 0;
-        var two_pair = false;
-        var split_pair = false;
-        const base = line_idx * 1000;
-        line_idx += 1;
-
-        inline for (0..16) |offset| {
-            const c = line[offset];
-            const cur_mask = @as(u32, 1) << @as(u5, @truncate(c - 'a'));
-            if ((FORBIDDEN_MASK & cur_mask & (prev_mask << 1)) != 0) {
-                nice1 = false;
-            }
-            if ((VOWEL_MASK & cur_mask) != 0) vowels += 1;
-            has_double = has_double or (prev_mask == cur_mask);
-            prev_mask = cur_mask;
-
-            const third: u32 = (c - 'a') + 1;
-            const pair_idx = 27 * second + third;
-            const pos = base + @as(u32, offset);
-            const delta = pos - pairs[pair_idx];
-
-            if (delta > offset) {
-                pairs[pair_idx] = pos;
-            } else if (delta > 1) {
-                two_pair = true;
-            }
-            split_pair = split_pair or (first == third);
-
-            first = second;
-            second = third;
-        }
-
-        if (nice1 and vowels >= 3 and has_double) count1 += 1;
-        if (two_pair and split_pair) count2 += 1;
+        const nice2 = @reduce(.Or, pair_repeat) and @reduce(.Or, letter_gap);
+        count2 += @intFromBool(nice2);
     }
 
     return .{ .p1 = count1, .p2 = count2 };

@@ -24,10 +24,22 @@ inline fn idx(x: i16, y: i16) usize {
     return @intCast(xi * GRID_SIZE + yi);
 }
 
+const BITS = GRID_SIZE * GRID_SIZE;
+const WORDS = (BITS + 63) / 64;
+
+// Marks a house as visited and returns 1 if it was new, 0 otherwise.
+inline fn visit(grid: *[WORDS]u64, pos: usize) u32 {
+    const mask = @as(u64, 1) << @as(u6, @truncate(pos));
+    const word = &grid[pos >> 6];
+    const is_new = word.* & mask == 0;
+    word.* |= mask;
+    return @intFromBool(is_new);
+}
+
 fn solve(data: []const u8) [2]u32 {
     @setRuntimeSafety(false);
-    var grid1 = [_]u8{0} ** (GRID_SIZE * GRID_SIZE);
-    var grid2 = [_]u8{0} ** (GRID_SIZE * GRID_SIZE);
+    var grid1 = [_]u64{0} ** WORDS;
+    var grid2 = [_]u64{0} ** WORDS;
 
     var sx: i16 = 0;
     var sy: i16 = 0;
@@ -37,8 +49,8 @@ fn solve(data: []const u8) [2]u32 {
     var rsy: i16 = 0;
 
     const start = idx(0, 0);
-    grid1[start] = 1;
-    grid2[start] = 1;
+    _ = visit(&grid1, start);
+    _ = visit(&grid2, start);
 
     var count1: u32 = 1;
     var count2: u32 = 1;
@@ -49,22 +61,16 @@ fn solve(data: []const u8) [2]u32 {
 
         sx += dx;
         sy += dy;
-        const pos1 = idx(sx, sy);
-        count1 += @intFromBool(grid1[pos1] == 0);
-        grid1[pos1] = 1;
+        count1 += visit(&grid1, idx(sx, sy));
 
         if (i & 1 == 0) {
             rx += dx;
             ry += dy;
-            const pos2 = idx(rx, ry);
-            count2 += @intFromBool(grid2[pos2] == 0);
-            grid2[pos2] = 1;
+            count2 += visit(&grid2, idx(rx, ry));
         } else {
             rsx += dx;
             rsy += dy;
-            const pos2 = idx(rsx, rsy);
-            count2 += @intFromBool(grid2[pos2] == 0);
-            grid2[pos2] = 1;
+            count2 += visit(&grid2, idx(rsx, rsy));
         }
     }
     return .{ count1, count2 };
