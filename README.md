@@ -71,10 +71,3 @@ zig build-exe dayXX.zig -O ReleaseFast -fstrip
 ./dayXX.exe
 ```
 
-> [!IMPORTANT]
-> **2019 Day 12 Build Requirement**  
-> Due to specific overflow safety requirements, Day 12 of 2019 must be compiled with `ReleaseSafe`:
-> ```bash
-> zig build-exe day12.zig -O ReleaseSafe -fstrip
-> ```
-
