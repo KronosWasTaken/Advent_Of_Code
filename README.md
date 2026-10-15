@@ -28,7 +28,7 @@ The following table summarizes total execution times for all 25 days of each yea
 
 | Year | Execution Time (Total) | Benchmark Documentation |
 | :--- | :--- | :--- |
-| 2015 | 1.65 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
+| 2015 | 1.64 ms | [2015_Zig/benchmark.md](2015_Zig/benchmark.md) |
 | 2016 | 135.84 ms | [2016_Zig/benchmark.md](2016_Zig/benchmark.md) |
 | 2017 | 114.94 ms | [2017_Zig/benchmark.md](2017_Zig/benchmark.md) |
 | 2018 | 92.86 ms | [2018_Zig/benchmark.md](2018_Zig/benchmark.md) |
@@ -39,7 +39,7 @@ The following table summarizes total execution times for all 25 days of each yea
 | 2023 | 11.52 ms | [2023_Zig/benchmark.md](2023_Zig/benchmark.md) |
 | 2024 | 21.57 ms | [2024_Zig/benchmark.md](2024_Zig/benchmark.md) |
 | 2025 | 8.93 ms | [2025_Zig/benchmark.md](2025_Zig/benchmark.md) |
-| **Total** | **872.28 ms (0.87 s)** | |
+| **Total** | **872.27 ms (0.87 s)** | |
 
 ---
 
@@ -51,7 +51,7 @@ Benchmarks for 2015-2025 were collected on the following system:
 - CPU: AMD Ryzen 5 6600H with Radeon Graphics
 - Laptop: Lenovo IdeaPad Gaming 3 15ARH7
 - GPU: AMD RadeonT 660M; NVIDIA GeForce RTX 3050 Laptop GPU (4 GB VRAM, driver 617.42, power limit 85 W in gaming mode)
-- GPU clock for the Day 04 GPU benchmark: locked at 2160 MHz, with a +200 MHz core offset in MSI Afterburner
+- GPU clock for the Day 04 GPU benchmark: locked at 2175 MHz, with a +200 MHz core offset in MSI Afterburner
 - RAM: 16 GB
 - Storage: Kingston SNV2S1000G SSD (1 TB), JMicron PCIe SSD (512 GB)
 - Zig: 0.15.2
@@ -72,4 +72,13 @@ zig build-exe dayXX.zig -O ReleaseFast -fstrip
 # Execute the binary
 ./dayXX.exe
 ```
+### Day 04 (GPU)
+Day 04 runs on an NVIDIA GPU (Windows, with the NVIDIA driver installed; no CUDA Toolkit needed). Rebuild the PTX for your GPU first, then build and run:
 
+```bash
+zig build-obj -target nvptx64-cuda -mcpu=sm_86 -O ReleaseFast -fno-emit-bin -femit-asm=day04_gpu_kernel.ptx day04_gpu_kernel.zig
+zig build-exe -O ReleaseFast -fstrip day04.zig --name day04
+./day04.exe
+```
+
+Use `-mcpu=sm_86` for RTX 30-series, `sm_89` for RTX 40-series, and `sm_120` for RTX 50-series.

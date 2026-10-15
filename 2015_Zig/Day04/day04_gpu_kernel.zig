@@ -27,6 +27,13 @@ const TBL3 = blk: {
     break :blk t;
 };
 
+const TBL3H = blk: {
+    @setEvalBranchQuota(100_000);
+    var t: [1000]u32 = undefined;
+    for (0..1000) |v| t[v] = TBL3[v] | 0x80000000;
+    break :blk t;
+};
+
 const TBL4 = blk: {
     @setEvalBranchQuota(200_000);
     var t: [10000]u32 = undefined;
@@ -64,7 +71,7 @@ inline fn md5Seven(n: u32) u32 {
     M[0] = 0x75727769;
     M[1] = 0x62717670;
     M[2] = TBL4[p];
-    M[3] = TBL3[t] | 0x80000000;
+    M[3] = TBL3H[t];
     M[14] = 15 * 8;
     return md5Rounds(&M);
 }
@@ -126,6 +133,8 @@ export fn search(start: u32, count: u32, digits: u32, best1: *u32, best2: *u32) 
     if (idx >= count) return;
     const n = start + idx;
     const h0 = if (n >= 1000000) md5Seven(n) else if (n >= 100000) md5Six(n) else md5Generic(n, 0);
-    if (h0 & 0x00F0FFFF == 0) _ = @atomicRmw(u32, best1, .Min, n, .monotonic);
-    if (h0 & 0x00FFFFFF == 0) _ = @atomicRmw(u32, best2, .Min, n, .monotonic);
+    if (h0 & 0x00F0FFFF == 0) {
+        _ = @atomicRmw(u32, best1, .Min, n, .monotonic);
+        if (h0 & 0x00FFFFFF == 0) _ = @atomicRmw(u32, best2, .Min, n, .monotonic);
+    }
 }
