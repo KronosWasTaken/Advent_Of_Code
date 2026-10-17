@@ -6,7 +6,6 @@ const std = @import("std");
 
 const lanes = 8;
 const il = 3;
-const futex_wait = false;
 const Vec = @Vector(lanes, u32);
 
 const K = [64]u32{
@@ -46,17 +45,12 @@ pub const Shared = struct {
     // are left. Spinning keeps the core awake, so there is no wake-up delay at the start.
     pub fn helper(s: *Shared) void {
         _ = s.ready.fetchAdd(1, .release);
-        if (futex_wait) {
-            while (s.go.load(.acquire) == 0) std.Thread.Futex.wait(&s.go, 0);
-        } else {
-            while (s.go.load(.acquire) == 0) std.atomic.spinLoopHint();
-        }
+        while (s.go.load(.acquire) == 0) std.atomic.spinLoopHint();
         while (s.workOne()) {}
     }
 
     pub fn start(s: *Shared) void {
         s.go.store(1, .release);
-        if (futex_wait) std.Thread.Futex.wake(&s.go, std.math.maxInt(u32));
     }
 
     // Claim and hash one chunk; false when none are left.

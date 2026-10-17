@@ -53,8 +53,6 @@ const decades: u32 = 1_000_000;
 // numbers above, sized so both usually finish together.
 const gpu_decades: u32 = 950_000;
 const helpers = 11;
-const debug_split = false;
-const main_works = true;
 
 // Launches the kernel on decades [start, end).
 fn search(drv: *const Driver, fun: CUfunction, start: u32, end: u32, d_best: CUdeviceptr) !void {
@@ -123,20 +121,15 @@ pub fn main() !void {
             }
             break;
         }
-        if (main_works) {
-            if (!shared.workOne()) break;
-        } else if (shared.next.load(.monotonic) >= shared.chunks) break;
+        if (!shared.workOne()) break;
     }
-    const t_loop = timer.read();
     var p: [2]u32 = undefined;
     // A synchronous copy waits for every kernel launched so far.
     if (drv.memcpyDtoH(&p, d_best, 8) != 0) return error.LaunchFailed;
-    const t_gpu = timer.read();
     while (shared.done.load(.acquire) < cpu_chunks) std.atomic.spinLoopHint();
     p[0] = @min(p[0], shared.best[0].load(.monotonic));
     p[1] = @min(p[1], shared.best[1].load(.monotonic));
     const us = @as(f64, @floatFromInt(timer.read())) / 1000.0;
-    if (debug_split) std.debug.print("loop {d:.0} gpu {d:.0} cpu chunks {}/{}\n", .{ @as(f64, @floatFromInt(t_loop)) / 1000.0, @as(f64, @floatFromInt(t_gpu)) / 1000.0, cpu_chunks, shared.chunks });
 
     std.debug.print("Part 1: {}\nPart 2: {}\n", .{ p[0], p[1] });
     std.debug.print("Time: {d:.2} microseconds\n", .{us});
