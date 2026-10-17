@@ -9,15 +9,6 @@ const Vec = @Vector(16, u8);
 const max_molecule = 1024;
 const hash_base: u64 = 0x9E3779B97F4A7C15;
 
-// powers[i] = hash_base^i, so a candidate's hash can be assembled from prefix hashes in O(1).
-const powers = blk: {
-    @setEvalBranchQuota(10_000);
-    var t: [max_molecule + 1]u64 = undefined;
-    t[0] = 1;
-    for (1..t.len) |i| t[i] = t[i - 1] *% hash_base;
-    break :blk t;
-};
-
 fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
     var reps_buf: [64]Replacement = undefined;
@@ -45,6 +36,11 @@ fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     var mol = [_]u8{0} ** (max_molecule + 32);
     @memcpy(mol[0..n], molecule);
 
+    // Powers of the base up to the longest candidate, built here rather than read from an
+    // 8 KB table: cheaper than the page faults of a cold table.
+    var powers: [max_molecule + 16]u64 = undefined;
+    powers[0] = 1;
+    for (1..n + 16) |i| powers[i] = powers[i - 1] *% hash_base;
     var prefix: [max_molecule + 1]u64 = undefined;
     prefix[0] = 0;
     for (0..n) |i| prefix[i + 1] = prefix[i] *% hash_base +% mol[i];
@@ -52,7 +48,7 @@ fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     // Polynomial hashes mod 2^64 can in principle collide, but for molecules this short
     // a collision among the candidates is negligibly unlikely; the answer is checked against
     // the exact distinct count.
-    var set = [_]u64{0} ** 2048;
+    var set = [_]u64{0} ** 1024;
     var p1: u32 = 0;
 
     for (reps) |rep| {
@@ -75,8 +71,8 @@ fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
                 var h = prefix[pos] *% powers[to_len + suffix_len] +% to_hash *% powers[suffix_len] +% suffix;
                 if (h == 0) h = 1;
 
-                var idx = (h *% 0x9E3779B97F4A7C15) >> 53;
-                while (set[idx] != 0 and set[idx] != h) idx = (idx + 1) & 2047;
+                var idx = (h *% 0x9E3779B97F4A7C15) >> 54;
+                while (set[idx] != 0 and set[idx] != h) idx = (idx + 1) & 1023;
                 if (set[idx] == 0) {
                     set[idx] = h;
                     p1 += 1;

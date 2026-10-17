@@ -44,50 +44,40 @@ inline fn solve(input: []const u8) struct { min: u32, max: u32 } {
         dist[idx_b][idx_a] = d;
     }
 
-    var table_min: [256][8]u16 = [_][8]u16{[_]u16{9999} ** 8} ** 256;
-    var table_max: [256][8]u16 = [_][8]u16{[_]u16{0} ** 8} ** 256;
-
+    // Held-Karp over subsets, one 8-lane vector per subset: lane k is the shortest (longest)
+    // route through exactly that subset ending at city k, +inf (-inf) where k is not in it.
+    // Extending to k is one vector add of "distance into k" and a horizontal min (max), with
+    // no data-dependent branches.
+    const V8 = @Vector(8, i16);
+    const inf: i16 = 16000;
+    const lane_bits = @Vector(8, u8){ 1, 2, 4, 8, 16, 32, 64, 128 };
+    var into: [8]V8 = undefined; // into[k][m] = distance m-k
     for (0..8) |k| {
-        table_min[@as(usize, 1) << @intCast(k)][k] = 0;
-        table_max[@as(usize, 1) << @intCast(k)][k] = 0;
+        for (0..8) |m| into[k][m] = @intCast(dist[m][k]);
     }
-
-    for (3..256) |set| {
-        if (@popCount(set) < 2) continue;
-
-        var k_bits = set;
-        while (k_bits != 0) {
-            const k = @ctz(k_bits);
-            k_bits &= k_bits - 1;
-            const subset = set ^ (@as(usize, 1) << @intCast(k));
-
-            var shortest: u16 = 9999;
-            var longest: u16 = 0;
-
-            var m_bits = subset;
-            while (m_bits != 0) {
-                const m = @ctz(m_bits);
-                m_bits &= m_bits - 1;
-                const d = dist[m][k];
-                const s = table_min[subset][m] + d;
-                const l = table_max[subset][m] + d;
-                if (s < shortest) shortest = s;
-                if (l > longest) longest = l;
+    var short: [256]V8 = undefined;
+    var long: [256]V8 = undefined;
+    short[0] = @splat(inf);
+    long[0] = @splat(-inf);
+    for (1..256) |set| {
+        const in_set = (@as(@Vector(8, u8), @splat(@intCast(set))) & lane_bits) != @as(@Vector(8, u8), @splat(0));
+        var s: V8 = @splat(0);
+        var l: V8 = @splat(0);
+        if (set & (set - 1) != 0) {
+            inline for (0..8) |k| {
+                // For k outside the set the lane is discarded below; reading the empty set
+                // (index 0) keeps it from touching rows not computed yet.
+                const prev = (set ^ (@as(usize, 1) << k)) & (@as(usize, 0) -% ((set >> k) & 1));
+                s[k] = @reduce(.Min, short[prev] + into[k]);
+                l[k] = @reduce(.Max, long[prev] + into[k]);
             }
-
-            table_min[set][k] = shortest;
-            table_max[set][k] = longest;
         }
+        short[set] = @select(i16, in_set, s, @as(V8, @splat(inf)));
+        long[set] = @select(i16, in_set, l, @as(V8, @splat(-inf)));
     }
 
-    var min_dist: u32 = 9999;
-    var max_dist: u32 = 0;
-    for (0..8) |k| {
-        min_dist = @min(min_dist, table_min[255][k]);
-        max_dist = @max(max_dist, table_max[255][k]);
-    }
-
-    return .{ .min = min_dist, .max = max_dist };
+    const full = (@as(usize, 1) << @intCast(city_count)) - 1;
+    return .{ .min = @intCast(@reduce(.Min, short[full])), .max = @intCast(@reduce(.Max, long[full])) };
 }
 pub fn main() !void {
     const input = @embedFile("input.txt");

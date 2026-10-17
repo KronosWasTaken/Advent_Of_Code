@@ -60,26 +60,20 @@ inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     const fly_vec: Vec = fly_arr;
     const rest_vec: Vec = rest_arr;
 
+    // Each reindeer's second within its fly + rest cycle: it flies while that is below `fly`.
+    // A wrapping counter needs no branch and keeps the per-second dependency chain short.
+    // Unused lanes have a zero cycle, so they never wrap, never fly and never lead.
+    const cycle_vec = fly_vec + rest_vec;
+    var phase: Vec = @splat(0);
     var dist: Vec = @splat(0);
-    var timer: Vec = fly_vec;
-    var is_flying: Vec = [_]u16{ 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0 };
     var scores: Vec = @splat(0);
     const ones: Vec = @splat(1);
     const zeros: Vec = @splat(0);
 
     for (0..2503) |_| {
-        // Move flying reindeer
-        dist += @select(u16, is_flying != zeros, spd_vec, zeros);
-        timer -= ones;
-
-        // Check if any timer expired
-        const expired = timer == zeros;
-        if (@reduce(.Or, expired)) {
-            // Flip flying state and reload timer
-            is_flying = @select(u16, expired, ~is_flying & ones, is_flying);
-            const new_timer = @select(u16, is_flying != zeros, fly_vec, rest_vec);
-            timer = @select(u16, expired, new_timer, timer);
-        }
+        dist += @select(u16, phase < fly_vec, spd_vec, zeros);
+        phase += ones;
+        phase = @select(u16, phase == cycle_vec, zeros, phase);
 
         // Leader scores a point
         const max_dist = @reduce(.Max, dist);

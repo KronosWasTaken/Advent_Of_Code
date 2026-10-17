@@ -45,49 +45,48 @@ inline fn solve(input: []const u8) struct { p1: i16, p2: i16 } {
         while (i < input.len and input[i] != '\n') : (i += 1) {}
     }
 
-    const Entry = struct { dist: i16, start: u8 };
-    var table: [256][8]Entry = undefined;
+    // Held-Karp over subsets, one 8-lane vector per subset: lane k is the best path through
+    // exactly that subset ending at person k (-inf where k is not in it). Extending to k is one
+    // vector add of "happiness into k" and a horizontal max, with no data-dependent branches.
+    // `free` lets the path start anywhere; `fixed` starts at person 0. Part 1 closes the fixed
+    // path back to person 0 (a seating is a cycle, so its start is arbitrary). Part 2 seats you
+    // between two neighbours, which just cuts the cycle: the best path with free ends.
+    const V8 = @Vector(8, i16);
+    const ninf: i16 = -16000;
+    const lane_bits = @Vector(8, u8){ 1, 2, 4, 8, 16, 32, 64, 128 };
+    var into: [8]V8 = undefined; // into[k][m] = happiness of edge m-k
     for (0..8) |k| {
-        table[@as(usize, 1) << @as(u3, @intCast(k))][k] = .{ .dist = 0, .start = @as(u8, @intCast(k)) };
+        for (0..8) |m| into[k][m] = hap[m][k];
     }
-
-    for (3..256) |set| {
-        if ((set & (set - 1)) == 0) continue;
-
-        var k_bits = set;
-        while (k_bits != 0) {
-            const k = @ctz(k_bits);
-            k_bits &= k_bits - 1;
-
-            const subset = set ^ (@as(usize, 1) << @as(u3, @intCast(k)));
-            var longest: i16 = -30000;
-            var start_node: u8 = 0;
-
-            var m_bits = subset;
-            while (m_bits != 0) {
-                const m = @ctz(m_bits);
-                m_bits &= m_bits - 1;
-
-                const prior = table[subset][m];
-                const d = prior.dist + hap[m][k];
-                if (d > longest) {
-                    longest = d;
-                    start_node = prior.start;
-                }
+    var free: [256]V8 = undefined;
+    var fixed: [256]V8 = undefined;
+    free[0] = @splat(ninf);
+    fixed[0] = @splat(ninf);
+    for (1..256) |set| {
+        const in_set = (@as(@Vector(8, u8), @splat(@intCast(set))) & lane_bits) != @as(@Vector(8, u8), @splat(0));
+        var f: V8 = undefined;
+        var z: V8 = undefined;
+        if (set & (set - 1) == 0) {
+            // A single person: a path of length 0 that may only start at person 0 when fixed.
+            f = @select(i16, in_set, @as(V8, @splat(0)), @as(V8, @splat(ninf)));
+            z = if (set == 1) f else @splat(ninf);
+        } else {
+            inline for (0..8) |k| {
+                // For k outside the set the lane is discarded below; reading the empty set
+                // (index 0, all -inf) keeps it from touching rows not computed yet.
+                const prev = (set ^ (@as(usize, 1) << k)) & (@as(usize, 0) -% ((set >> k) & 1));
+                f[k] = @reduce(.Max, free[prev] + into[k]);
+                z[k] = @reduce(.Max, fixed[prev] + into[k]);
             }
-            table[set][k] = .{ .dist = longest, .start = start_node };
+            f = @select(i16, in_set, f, @as(V8, @splat(ninf)));
+            z = @select(i16, in_set, z, @as(V8, @splat(ninf)));
         }
+        free[set] = f;
+        fixed[set] = z;
     }
 
-    var p1: i16 = -30000;
-    var p2: i16 = -30000;
-    for (0..8) |k| {
-        const entry = table[255][k];
-        const loop_d = entry.dist + hap[entry.start][k];
-        if (loop_d > p1) p1 = loop_d;
-        if (entry.dist > p2) p2 = entry.dist;
-    }
-
+    const p1 = @reduce(.Max, fixed[(@as(usize, 1) << @intCast(cnt)) - 1] + into[0]);
+    const p2 = @reduce(.Max, free[(@as(usize, 1) << @intCast(cnt)) - 1]);
     return .{ .p1 = p1, .p2 = p2 };
 }
 

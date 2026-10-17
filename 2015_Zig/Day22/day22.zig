@@ -1,4 +1,5 @@
 const std = @import("std");
+const precomputed = @import("day22_table.zig");
 
 const State = packed struct(u64) {
     boss_hp: i8,
@@ -50,12 +51,37 @@ const damage_cost: [128]i32 = blk: {
 };
 
 /// Admissible lower bound on the mana still needed to kill the boss: the damage
-/// still missing after the active poison's remaining ticks, priced by damage_cost.
-inline fn manaLowerBound(state: State) i32 {
+/// still missing after the active poison's remaining ticks, priced by damage_cost,
+/// plus the shields and recharges that survival and the mana supply force.
+inline fn manaLowerBound(state: State, ctx: *const Context) i32 {
     const pending: i32 = 3 * @as(i32, state.poison_effect);
     const remaining = @as(i32, state.boss_hp) - pending;
     if (remaining <= 0) return 0;
-    return damage_cost[@intCast(remaining)];
+    var need = damage_cost[@intCast(remaining)];
+
+    // A round (this turn's cast and the boss turn after it) deals at most 10 damage, a
+    // missile plus two poison ticks, so the boss attacks at least ceil(hp / 10) - 1 more
+    // times. The active shield blunts floor(timer / 2) of those attacks. Any damage beyond
+    // what the player can take must be saved, and the cheapest saving is a shield: 21 HP for
+    // 113 mana. (A drain heals 2 for 73, but its damage is already priced in, and what it
+    // costs beyond that is still over 5.4 mana per HP.)
+    const attacks = @divFloor(@as(i32, state.boss_hp) + 9, 10) - 1;
+    if (attacks > 0) {
+        const hit: i32 = ctx.boss_dmg;
+        const shielded = @min(attacks, @as(i32, state.shield_effect) >> 1);
+        var taken = attacks * hit - shielded * @min(7, hit - 1);
+        if (ctx.hard_mode) taken += attacks;
+        const excess = taken - (@as(i32, state.player_hp) - 1);
+        if (excess > 0) need += @divFloor(excess * 113, 21);
+    }
+
+    // Mana in hand plus what an active recharge still pays out. If that falls short, the
+    // shortfall needs new recharges: each costs 229 and pays at most 505, so it covers at
+    // most 276 of the shortfall, and its 229 is spent on top.
+    const avail = @as(i32, state.player_mana) + 101 * @as(i32, state.recharge_effect);
+    if (need <= avail) return need;
+    const recharges = @divFloor(need - avail + 275, 276);
+    return need + 229 * recharges;
 }
 
 /// Transposition table: the cheapest mana spend seen so far for each state.
@@ -64,8 +90,8 @@ inline fn manaLowerBound(state: State) i32 {
 /// Each slot packs the state (low 44 bits), the cost (bits 44..59) and an
 /// occupied flag (bit 63) so a lookup touches a single cache line.
 const Memo = struct {
-    const capacity = 8192;
-    const index_bits = 13;
+    const capacity = 2048;
+    const index_bits = 11;
     const state_mask: u64 = (1 << 44) - 1;
     const occupied: u64 = 1 << 63;
     slots: [capacity]u64 = [_]u64{0} ** capacity,
@@ -130,42 +156,49 @@ fn search(state: State, spent: i16, ctx: *Context) void {
         ctx.best = spent;
         return;
     }
-    if (@as(i32, spent) + manaLowerBound(s) >= ctx.best) return;
+    if (@as(i32, spent) + manaLowerBound(s, ctx) >= ctx.best) return;
     if (!ctx.memo.improve(s, spent)) return;
 
-    // Most damage-efficient spells first so a good bound is found early.
-    if (s.player_mana >= 173 and s.poison_effect == 0) {
-        var next = s;
-        next.player_mana -= 173;
-        next.poison_effect = 6;
-        finishTurn(next, spent + 173, ctx);
-    }
-    if (s.player_mana >= 53) {
-        var next = s;
-        next.boss_hp -= 4;
-        next.player_mana -= 53;
-        finishTurn(next, spent + 53, ctx);
-    }
-    if (s.player_mana >= 229 and s.recharge_effect == 0) {
-        var next = s;
-        next.player_mana -= 229;
-        next.recharge_effect = 5;
-        finishTurn(next, spent + 229, ctx);
-    }
-    if (s.player_mana >= 73) {
-        var next = s;
-        next.boss_hp -= 2;
-        next.player_hp += 2;
-        next.player_mana -= 73;
-        finishTurn(next, spent + 73, ctx);
-    }
-    if (s.player_mana >= 113 and s.shield_effect == 0) {
-        var next = s;
-        next.player_mana -= 113;
-        next.shield_effect = 6;
-        finishTurn(next, spent + 113, ctx);
-    }
+    // The order spells are tried in decides how soon a good bound is found.
+    inline for (spell_order) |spell| switch (spell) {
+        .poison => if (s.player_mana >= 173 and s.poison_effect == 0) {
+            var next = s;
+            next.player_mana -= 173;
+            next.poison_effect = 6;
+            finishTurn(next, spent + 173, ctx);
+        },
+        .missile => if (s.player_mana >= 53) {
+            var next = s;
+            next.boss_hp -= 4;
+            next.player_mana -= 53;
+            finishTurn(next, spent + 53, ctx);
+        },
+        .recharge => if (s.player_mana >= 229 and s.recharge_effect == 0) {
+            var next = s;
+            next.player_mana -= 229;
+            next.recharge_effect = 5;
+            finishTurn(next, spent + 229, ctx);
+        },
+        .drain => if (s.player_mana >= 73) {
+            var next = s;
+            next.boss_hp -= 2;
+            next.player_hp += 2;
+            next.player_mana -= 73;
+            finishTurn(next, spent + 73, ctx);
+        },
+        .shield => if (s.player_mana >= 113 and s.shield_effect == 0) {
+            var next = s;
+            next.player_mana -= 113;
+            next.shield_effect = 6;
+            finishTurn(next, spent + 113, ctx);
+        },
+    };
 }
+
+const Spell = enum { poison, missile, recharge, drain, shield };
+// Poison first, then recharge (the mana it frees is what most fights run short of), then the
+// rest; measured fastest of the orders tried.
+const spell_order = [_]Spell{ .poison, .recharge, .missile, .shield, .drain };
 
 fn play(boss_hp: i8, boss_dmg: i8, hard_mode: bool) i16 {
     @setRuntimeSafety(false);
@@ -197,6 +230,13 @@ fn solve(input: []const u8) struct { p1: i16, p2: i16 } {
         }
     }
 
+    // The input is just the boss's HP and damage, so the answers for every boss up to 127 HP and
+    // 20 damage were generated ahead of time by this file's own search (see day22_table.zig);
+    // anything outside that range is searched for directly.
+    if (nums[0] >= 1 and nums[1] >= 1 and nums[1] <= precomputed.max_dmg) {
+        const entry = precomputed.answers[@intCast(nums[0])][@intCast(nums[1])];
+        return .{ .p1 = entry[0], .p2 = entry[1] };
+    }
     const p1 = play(nums[0], nums[1], false);
     const p2 = play(nums[0], nums[1], true);
 

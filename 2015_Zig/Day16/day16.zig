@@ -26,16 +26,20 @@ const attr_ok = blk: {
     break :blk t;
 };
 
-inline fn key3(a: u8, b: u8, c: u8) usize {
-    return (@as(usize, a - 'a') * 26 + (b - 'a')) * 26 + (c - 'a');
+inline fn key2(a: u8, b: u8) usize {
+    return @as(usize, a - 'a') * 26 + (b - 'a');
 }
 
-// The last three letters of every attribute name are unique.
+// The third- and second-to-last letters of every attribute name are unique, so a 676-byte
+// table names the attribute. (A three-letter key would need 17.5 KB, which costs page
+// faults on a cold run.)
 const attr_by_key = blk: {
     @setEvalBranchQuota(10_000);
-    var t = [_]u8{0} ** (26 * 26 * 26);
+    var t = [_]u8{0xFF} ** (26 * 26);
     for (attr_names, 0..) |name, attr| {
-        t[key3(name[name.len - 3], name[name.len - 2], name[name.len - 1])] = attr;
+        const k = key2(name[name.len - 3], name[name.len - 2]);
+        if (t[k] != 0xFF) @compileError("attribute key collision");
+        t[k] = attr;
     }
     break :blk t;
 };
@@ -78,7 +82,7 @@ fn solve(input: []const u8) struct { p1: u16, p2: u16 } {
         var matches: u8 = 3;
         inline for (1..4) |attr_num| {
             const colon = colons[c + attr_num];
-            const attr = attr_by_key[key3(input[colon - 3], input[colon - 2], input[colon - 1])];
+            const attr = attr_by_key[key2(input[colon - 3], input[colon - 2])];
             const d0 = input[colon + 2] - '0';
             const d1 = input[colon + 3] -% '0';
             const two_digits = d1 < 10;

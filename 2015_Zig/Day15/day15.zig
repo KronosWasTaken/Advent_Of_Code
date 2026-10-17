@@ -1,10 +1,19 @@
 const std = @import("std");
 
-const Vec = @Vector(4, f64);
-const Mask = @Vector(4, bool);
+// Lanes are values of a; several vectors' worth are in flight so their dependency chains overlap.
+const lanes = 8;
+const Vec = @Vector(lanes, f64);
+const Mask = @Vector(lanes, bool);
 
 inline fn splat(x: f64) Vec {
     return @splat(x);
+}
+
+// Product of the four property totals at c (teaspoons of ingredient 2) on a line.
+inline fn score(alpha: [5]Vec, dc: [5]f64, c: Vec) Vec {
+    var s: Vec = splat(1);
+    for (0..4) |j| s *= alpha[j] + c * splat(dc[j]);
+    return s;
 }
 
 inline fn solve(input: []const u8) struct { p1: i64, p2: i64 } {
@@ -70,25 +79,31 @@ inline fn solve(input: []const u8) struct { p1: i64, p2: i64 } {
     var p1v: Vec = splat(0);
     var p2v: Vec = splat(0);
 
-    var a: usize = 0;
-    while (a <= 100) : (a += 1) {
-        const af: f64 = @floatFromInt(a);
-        const b_max: f64 = 100.0 - af;
-        var base: [5]f64 = undefined;
+    // Inside [lo, hi] every total is positive, so log(score) is a sum of logs of positive
+    // affine functions of c: concave. The scores along a line therefore rise and then fall,
+    // and climbing from any start reaches the line's exact maximum. Each line starts from the
+    // previous line's best c, which is usually within a step or two of the new one. The four
+    // lanes are four values of a, and b steps through each lane's lines in order.
+    var a0: f64 = 0;
+    while (a0 <= 100) : (a0 += lanes) {
+        const av: Vec = splat(a0) + std.simd.iota(f64, lanes);
+        const b_max: Vec = splat(100) - av;
+        var base: [5]Vec = undefined;
         for (0..5) |j| {
-            base[j] = af * @as(f64, @floatFromInt(ing[0][j])) + (100.0 - af) * @as(f64, @floatFromInt(ing[3][j]));
+            base[j] = av * splat(@floatFromInt(ing[0][j])) + b_max * splat(@floatFromInt(ing[3][j]));
         }
+        var best_c: Vec = splat(0);
 
-        var b0: f64 = 0;
-        while (b0 <= b_max) : (b0 += 4) {
-            const bv: Vec = splat(b0) + Vec{ 0, 1, 2, 3 };
-            var ok: Mask = bv <= splat(b_max);
+        var b: f64 = 0;
+        while (b <= 100 - a0) : (b += 1) {
+            const bv: Vec = splat(b);
+            var ok: Mask = bv <= b_max;
 
             var alpha: [5]Vec = undefined;
-            for (0..5) |j| alpha[j] = splat(base[j]) + bv * splat(db[j]);
+            for (0..5) |j| alpha[j] = base[j] + bv * splat(db[j]);
 
             var lo: Vec = splat(0);
-            var hi: Vec = splat(b_max) - bv;
+            var hi: Vec = b_max - bv;
             for (0..4) |j| {
                 if (dc[j] == 0) {
                     ok = ok & (alpha[j] > splat(0));
@@ -98,19 +113,23 @@ inline fn solve(input: []const u8) struct { p1: i64, p2: i64 } {
                     if (dc[j] > 0) lo = @max(lo, q) else hi = @min(hi, q);
                 }
             }
+            ok = ok & (lo <= hi);
 
-            var t: [4]Vec = undefined;
-            for (0..4) |j| t[j] = alpha[j] + lo * splat(dc[j]);
-            var c = lo;
-            var line_max: Vec = splat(0);
+            var c = @min(@max(best_c, lo), hi);
+            var cur = score(alpha, dc, c);
             while (true) {
-                const active = ok & (c <= hi);
-                if (!@reduce(.Or, active)) break;
-                const s = t[0] * t[1] * t[2] * t[3];
-                line_max = @max(line_max, @select(f64, active, s, splat(0)));
-                for (0..4) |j| t[j] += splat(dc[j]);
-                c += splat(1);
+                const up_ok = ok & (c + splat(1) <= hi);
+                const dn_ok = ok & (c - splat(1) >= lo);
+                const up = score(alpha, dc, c + splat(1));
+                const dn = score(alpha, dc, c - splat(1));
+                const go_up = up_ok & (up > cur);
+                const go_dn = dn_ok & (dn > cur) & !go_up;
+                if (!@reduce(.Or, go_up | go_dn)) break;
+                c = @select(f64, go_up, c + splat(1), @select(f64, go_dn, c - splat(1), c));
+                cur = @select(f64, go_up, up, @select(f64, go_dn, dn, cur));
             }
+            best_c = @select(f64, ok, c, best_c);
+            const line_max = @select(f64, ok, cur, splat(0));
             p1v = @max(p1v, line_max);
 
             // Calories are linear in c too: either one c gives exactly 500, or the
@@ -121,9 +140,7 @@ inline fn solve(input: []const u8) struct { p1: i64, p2: i64 } {
                 const exact = n4 - q4 * splat(dd[4]) == splat(0);
                 const c2 = if (dc[4] > 0) q4 else -q4;
                 const cand = ok & exact & (c2 >= lo) & (c2 <= hi);
-                for (0..4) |j| t[j] = alpha[j] + c2 * splat(dc[j]);
-                const s2 = t[0] * t[1] * t[2] * t[3];
-                p2v = @max(p2v, @select(f64, cand, s2, splat(0)));
+                p2v = @max(p2v, @select(f64, cand, score(alpha, dc, c2), splat(0)));
             } else {
                 const cand = ok & (alpha[4] == splat(500));
                 p2v = @max(p2v, @select(f64, cand, line_max, splat(0)));

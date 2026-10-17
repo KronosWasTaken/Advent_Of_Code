@@ -1,51 +1,59 @@
 const std = @import("std");
+
+const Vec = @Vector(64, u8);
+
+inline fn bitsOf(v: Vec, comptime c: u8) u64 {
+    return @as(u64, @bitCast(v == @as(Vec, @splat(c))));
+}
+
+// Which characters are escaped, 64 at a time (the backslash-run trick from simdjson): a
+// character is escaped when it follows an odd-length run of backslashes. `carry` is 1 when
+// the previous block ended on an escaping backslash.
+inline fn escapedChars(backslash: u64, carry: *u64) u64 {
+    const odd_bits: u64 = 0xAAAAAAAAAAAAAAAA;
+    const potential = backslash & ~carry.*;
+    const code = (((potential << 1) | odd_bits) -% potential) ^ odd_bits;
+    const escaped = code ^ (backslash | carry.*);
+    carry.* = (code & backslash) >> 63;
+    return escaped;
+}
+
+// Every string is one line, so with E escapes of which X are \x, the code is 2 + its memory
+// length plus E + 2X characters longer: part 1 is 2 per line + E + 2X. Encoding adds one
+// character per quote or backslash plus the 2 new enclosing quotes, so part 2 is
+// quotes + backslashes + 2 per line.
 inline fn solve(input: []const u8) struct { p1: i32, p2: i32 } {
     @setRuntimeSafety(false);
-    var p1: i32 = 0;
-    var p2: i32 = 0;
-
-    var i: usize = 0;
-    // Trim trailing newlines/spaces
     var len = input.len;
     while (len > 0 and input[len - 1] <= ' ') : (len -= 1) {}
 
-    // Skip the very first quote
-    while (i < len and input[i] != '"') : (i += 1) {}
-    i += 1;
-
-    while (i < len) {
-        const c = input[i];
-        if (c == '\\') {
-            if (i + 1 < len and input[i + 1] == 'x') {
-                p1 += 3;
-                i += 4;
-            } else {
-                p1 += 1;
-                i += 2;
-            }
-        } else if (c == '"') {
-            p1 += 2;
-            // Skip closing quote, newline, and next line's opening quote
-            i += 1;
-            while (i < len and input[i] != '"') : (i += 1) {}
-            i += 1; // skip next opening quote
+    var escapes: u32 = 0;
+    var hex: u32 = 0;
+    var specials: u32 = 0;
+    var newlines: u32 = 0;
+    var carry: u64 = 0;
+    var base: usize = 0;
+    while (base < len) : (base += 64) {
+        var v: Vec = undefined;
+        if (len - base >= 64) {
+            v = input[base..][0..64].*;
         } else {
-            i += 1;
+            var block = [_]u8{0} ** 64;
+            @memcpy(block[0 .. len - base], input[base..len]);
+            v = block;
         }
+        const backslash = bitsOf(v, '\\');
+        const escaped = escapedChars(backslash, &carry);
+        escapes += @popCount(escaped);
+        hex += @popCount(escaped & bitsOf(v, 'x'));
+        specials += @popCount(backslash | bitsOf(v, '"'));
+        newlines += @popCount(bitsOf(v, '\n'));
     }
-
-    // Part 2: each quote or backslash adds 1, each newline adds 2
-    for (input[0..len]) |c| {
-        if (c == '"' or c == '\\') {
-            p2 += 1;
-        } else if (c == '\n') {
-            p2 += 2;
-        }
-    }
-    // Final line also needs 2 enclosing quotes
-    p2 += 2;
-
-    return .{ .p1 = p1, .p2 = p2 };
+    const lines = newlines + 1;
+    return .{
+        .p1 = @intCast(2 * lines + escapes + 2 * hex),
+        .p2 = @intCast(specials + 2 * lines),
+    };
 }
 pub fn main() !void {
     const input = @embedFile("input.txt");

@@ -1,89 +1,103 @@
 const std = @import("std");
 
-const MASK: u64 = (@as(u64, 1) << 50) - 1;
-const LEFT_CORNER: u64 = @as(u64, 1) << 49;
-const RIGHT_CORNER: u64 = @as(u64, 1) << 0;
+const EVEN_BITS: u64 = 0x5555_5555_5555_5555;
+const ODD_BITS: u64 = 0xAAAA_AAAA_AAAA_AAAA;
 
-// Lanes: 0 = even columns (part 1), 1 = even columns (part 2),
-// 2 = odd columns (part 1), 3 = odd columns (part 2).
+// Lanes: 0 = even columns (part 1), 1 = odd columns (part 1),
+// 2 = even columns (part 2), 3 = odd columns (part 2). Column x is bit x / 2 of its parity word.
 const Row = @Vector(4, u64);
-const Shift1: @Vector(4, u6) = @splat(1);
-const MASK_VEC: Row = @splat(MASK);
-const CORNER: Row = .{ 0, LEFT_CORNER, 0, RIGHT_CORNER };
-const EVEN_LANES: @Vector(4, bool) = .{ true, true, false, false };
-const SWAP_PARITY = [4]i32{ 2, 3, 0, 1 };
+const SHIFT_UP: @Vector(4, u6) = .{ 15, 0, 15, 0 };
+const SHIFT_DOWN: @Vector(4, u6) = .{ 14, 1, 14, 1 };
+// Part 2 corners: column 0 is even bit 0, column 99 is odd bit 49.
+const CORNER: Row = .{ 0, 0, 1, @as(u64, 1) << 49 };
+const SWAP_PARITY = [4]i32{ 1, 0, 3, 2 };
+const Bytes = @Vector(32, u8);
+const HASH: Bytes = @splat('#');
 
-inline fn halfAdder(a: Row, b: Row) struct { Row, Row } {
-    return .{ a & b, a ^ b };
-}
-
-inline fn fullAdder(a: Row, b: Row, c: Row) struct { Row, Row } {
-    return .{ (a & b) | (c & (a ^ b)), a ^ b ^ c };
-}
-
-// Every column's neighbours have the other parity, so the other parity's word is put in each half.
+// Every column's neighbours have the other parity, so the other parity's word is swapped in
+// (an in-lane shuffle, since both parities of a part share a 128-bit half).
 inline fn swapParity(v: Row) Row {
     return @shuffle(u64, v, undefined, SWAP_PARITY);
 }
 
+// Even column 2k's second neighbour is odd column 2k-1 (bit k-1 -> shift up), odd column 2k+1's is
+// even column 2k+2 (bit k+1 -> shift down). Two variable shifts do both directions without a blend,
+// and going up by 15 then down by 14 drops column 99 off the word's top instead of needing a mask.
 inline fn toNeighbour(v: Row) Row {
-    return @select(u64, EVEN_LANES, v >> Shift1, v << Shift1);
+    return (v << SHIFT_UP) >> SHIFT_DOWN;
+}
+
+// Per row, once per step: h = left + self + right (2 bits), p = left + right (2 bits).
+// Each row's sums serve the rows above and below it, so only one shuffle and two shifts per row.
+const Sums = struct { h1: Row, h0: Row, p1: Row, p0: Row };
+
+inline fn horizontal(row: Row) Sums {
+    const same = swapParity(row);
+    const other = toNeighbour(same);
+    const p1 = same & other;
+    const p0 = same ^ other;
+    return .{ .h1 = p1 | (row & p0), .h0 = p0 ^ row, .p1 = p1, .p0 = p0 };
+}
+
+inline fn hashBits(chunk: *const [32]u8) u64 {
+    const v: Bytes = chunk.*;
+    return @as(u32, @bitCast(v == HASH));
+}
+
+inline fn pext(src: u64, mask: u64) u64 {
+    return asm ("pextq %[mask], %[src], %[ret]"
+        : [ret] "=r" (-> u64),
+        : [src] "r" (src),
+          [mask] "r" (mask),
+    );
 }
 
 inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     @setRuntimeSafety(false);
-    var grid: [101]Row = [_]Row{@splat(0)} ** 101;
+    var grid: [101]Row = undefined;
+    grid[100] = @splat(0);
 
-    var y: usize = 0;
-    var x: usize = 0;
-    var even: u64 = 0;
-    var odd: u64 = 0;
-
-    for (input) |c| {
-        const cell: usize = @intFromBool(c == '#' or c == '.');
-        const bit: u64 = @intFromBool(c == '#');
-        const is_odd: u64 = x & 1;
-        // Column x is bit 49 - x / 2 of its parity word, so each word holds its columns from the left.
-        const shift: u6 = @intCast(49 - (x >> 1));
-        even |= (bit & (1 - is_odd)) << shift;
-        odd |= (bit & is_odd) << shift;
-        x += cell;
-        if (x == 100) {
-            grid[y] = .{ even, even, odd, odd };
-            y += 1;
-            x = 0;
-            even = 0;
-            odd = 0;
-        }
+    const stride = std.mem.indexOfScalar(u8, input, '\n').? + 1;
+    for (0..100) |y| {
+        const line = input[y * stride ..];
+        // Columns 0..63 and 64..99; the last load ends exactly at column 99 to stay inside the input.
+        const lo = hashBits(line[0..32]) | hashBits(line[32..64]) << 32;
+        const hi = hashBits(line[64..96]) | (hashBits(line[68..100]) >> 28) << 32;
+        const even = pext(lo, EVEN_BITS) | pext(hi, EVEN_BITS) << 32;
+        const odd = pext(lo, ODD_BITS) | pext(hi, ODD_BITS) << 32;
+        grid[y] = .{ even, odd, even, odd };
     }
 
     grid[0] |= CORNER;
     grid[99] |= CORNER;
 
-    var grid2: [101]Row = [_]Row{@splat(0)} ** 101;
+    var grid2: [101]Row = undefined;
+    grid2[100] = @splat(0);
     var cur = &grid;
     var nxt = &grid2;
 
     var step: usize = 0;
     while (step < 100) : (step += 1) {
-        var above: Row = @splat(0);
-        var row: Row = @splat(0);
-        var below = cur[0];
+        var above: Sums = .{ .h1 = @splat(0), .h0 = @splat(0), .p1 = @splat(0), .p0 = @splat(0) };
+        var row = cur[0];
+        var mid = horizontal(row);
 
         var gy: usize = 0;
         while (gy < 100) : (gy += 1) {
-            above = row;
-            row = below;
-            below = cur[gy + 1];
+            const below_row = cur[gy + 1];
+            const below = horizontal(below_row);
 
-            const jk = fullAdder(swapParity(above), swapParity(row), swapParity(below));
-            const lm = halfAdder(above, below);
-            const n = toNeighbour(jk[0]);
-            const o = toNeighbour(jk[1]);
+            // Neighbour count = row sums above and below + the pair sum beside the cell.
+            const twos_carry = (above.h1 & below.h1) | (mid.p1 & (above.h1 ^ below.h1));
+            const twos = above.h1 ^ below.h1 ^ mid.p1;
+            const ones_carry = (above.h0 & below.h0) | (mid.p0 & (above.h0 ^ below.h0));
+            const ones = above.h0 ^ below.h0 ^ mid.p0;
+            // Alive next iff (count | alive) == 3.
+            nxt[gy] = (row | ones) & (twos ^ ones_carry) & ~twos_carry;
 
-            const pq = fullAdder(jk[0], lm[0], n);
-            const rs = fullAdder(jk[1], lm[1], o);
-            nxt[gy] = (row | rs[1]) & (pq[1] ^ rs[0]) & ~pq[0] & MASK_VEC;
+            above = mid;
+            mid = below;
+            row = below_row;
         }
 
         nxt[0] |= CORNER;
@@ -97,8 +111,8 @@ inline fn solve(input: []const u8) struct { p1: u32, p2: u32 } {
     var count_p1: u32 = 0;
     var count_p2: u32 = 0;
     for (0..100) |gy| {
-        count_p1 += @popCount(cur[gy][0]) + @popCount(cur[gy][2]);
-        count_p2 += @popCount(cur[gy][1]) + @popCount(cur[gy][3]);
+        count_p1 += @popCount(cur[gy][0]) + @popCount(cur[gy][1]);
+        count_p2 += @popCount(cur[gy][2]) + @popCount(cur[gy][3]);
     }
 
     return .{ .p1 = count_p1, .p2 = count_p2 };

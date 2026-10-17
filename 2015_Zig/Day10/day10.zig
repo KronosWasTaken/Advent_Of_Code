@@ -154,56 +154,36 @@ const Model = blk: {
     break :blk elements;
 };
 
+// Length of each element's sequence after `steps` rounds, for every element at once: an element's
+// length after k rounds is the sum of its decay products' lengths after k - 1. Done at compile
+// time, so solving is just recognising which element the input is.
+fn lengthsAfter(comptime steps: usize) [92]usize {
+    @setEvalBranchQuota(1_000_000);
+    var len: [92]usize = undefined;
+    for (Model, 0..) |elem, i| len[i] = elem.len;
+    for (0..steps) |_| {
+        var next: [92]usize = undefined;
+        for (Model, 0..) |elem, i| {
+            var total: usize = 0;
+            for (elem.decays[0..elem.decay_count]) |d| total += len[d];
+            next[i] = total;
+        }
+        len = next;
+    }
+    return len;
+}
+
+const len40 = lengthsAfter(40);
+const len50 = lengthsAfter(50);
+
 inline fn solve(input: []const u8) struct { p1: usize, p2: usize } {
     @setRuntimeSafety(false);
     const trimmed = std.mem.trim(u8, input, " \r\n\t");
-
-    var current = [_]usize{0} ** 92;
     inline for (Model, 0..) |elem, i| {
-        if (std.mem.eql(u8, elem.seq, trimmed)) {
-            current[i] = 1;
-        }
+        if (std.mem.eql(u8, elem.seq, trimmed)) return .{ .p1 = len40[i], .p2 = len50[i] };
     }
-
-    // Step 40 times for part 1
-    for (0..40) |_| {
-        var next = [_]usize{0} ** 92;
-        inline for (Model, 0..) |elem, i| {
-            const cnt = current[i];
-            if (cnt > 0) {
-                inline for (0..elem.decay_count) |d_idx| {
-                    next[elem.decays[d_idx]] += cnt;
-                }
-            }
-        }
-        current = next;
-    }
-
-    var p1: usize = 0;
-    inline for (Model, 0..) |elem, i| {
-        p1 += current[i] * elem.len;
-    }
-
-    // Step 10 more times for part 2
-    for (0..10) |_| {
-        var next = [_]usize{0} ** 92;
-        inline for (Model, 0..) |elem, i| {
-            const cnt = current[i];
-            if (cnt > 0) {
-                inline for (0..elem.decay_count) |d_idx| {
-                    next[elem.decays[d_idx]] += cnt;
-                }
-            }
-        }
-        current = next;
-    }
-
-    var p2: usize = 0;
-    inline for (Model, 0..) |elem, i| {
-        p2 += current[i] * elem.len;
-    }
-
-    return .{ .p1 = p1, .p2 = p2 };
+    // Like the element-counting version this replaced, only single-element inputs are handled.
+    return .{ .p1 = 0, .p2 = 0 };
 }
 
 pub fn main() !void {

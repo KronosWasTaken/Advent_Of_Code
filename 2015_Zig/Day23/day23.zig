@@ -8,12 +8,42 @@ const Op = union(enum) {
     jie: i32,
     jio: i32,
 };
-fn execute(program: []const Op, initial_a: u64) u64 {
+// The 8-instruction loop that counts Collatz steps:
+//   jio a, +8 / inc b / jie a, +4 / tpl a / inc a / jmp +2 / hlf a / jmp -7
+// While a != 1 it adds one to b and maps a to a / 2 or 3a + 1.
+fn isCollatz(ops: []const Op) bool {
+    if (ops.len < 8) return false;
+    const want = [8]Op{ .{ .jio = 8 }, .inc_b, .{ .jie = 4 }, .tpl, .inc_a, .{ .jmp = 2 }, .hlf, .{ .jmp = -7 } };
+    for (ops[0..8], want) |op, w| {
+        if (std.meta.activeTag(op) != std.meta.activeTag(w)) return false;
+        switch (op) {
+            .jmp, .jie, .jio => |off| switch (w) {
+                .jmp, .jie, .jio => |woff| if (off != woff) return false,
+                else => unreachable,
+            },
+            else => {},
+        }
+    }
+    return true;
+}
+
+fn execute(program: []const Op, initial_a: u64, collatz_at: ?usize) u64 {
     @setRuntimeSafety(false);
     var a = initial_a;
     var b: u64 = 0;
     var pc: i32 = 0;
     while (pc >= 0 and pc < program.len) {
+        // Run the recognised loop natively and branch-free instead of interpreting it.
+        if (collatz_at) |at| {
+            if (pc == at) {
+                while (a != 1) {
+                    b += 1;
+                    a = if (a & 1 == 0) a / 2 else 3 * a + 1;
+                }
+                pc += 8;
+                continue;
+            }
+        }
         switch (program[@intCast(pc)]) {
             .hlf => {
                 a /= 2;
@@ -80,8 +110,15 @@ fn solve(input: []const u8) struct { p1: u64, p2: u64 } {
         }
         prog_len += 1;
     }
-    const p1 = execute(program[0..prog_len], 0);
-    const p2 = execute(program[0..prog_len], 1);
+    var collatz_at: ?usize = null;
+    for (0..prog_len) |at| {
+        if (isCollatz(program[at..prog_len])) {
+            collatz_at = at;
+            break;
+        }
+    }
+    const p1 = execute(program[0..prog_len], 0, collatz_at);
+    const p2 = execute(program[0..prog_len], 1, collatz_at);
     return .{ .p1 = p1, .p2 = p2 };
 }
 fn parseOffset(s: []const u8) i32 {

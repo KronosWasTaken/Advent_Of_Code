@@ -28,23 +28,25 @@ inline fn parseNum(s: []const u8) u16 {
     return n;
 }
 
-var circuit: [729]Gate = undefined;
-var cache: [729]u16 = undefined;
 
-fn signal(key: u16) u16 {
-    if (cache[key] != 0xFFFF) return cache[key];
-    const g = circuit[key];
+// The circuit and the signal cache live on the stack: on this machine first-touching stack
+// pages is cheaper than first-touching fresh global (BSS) pages.
+const Circuit = struct { gates: [729]Gate, cache: [729]u16 };
+
+fn signal(cc: *Circuit, key: u16) u16 {
+    if (cc.cache[key] != 0xFFFF) return cc.cache[key];
+    const g = cc.gates[key];
     const res: u16 = switch (g.op) {
         .constant => g.in1,
-        .wire => signal(g.in1),
-        .not => ~signal(g.in1),
-        .bit => 1 & signal(g.in2),
-        .and_op => signal(g.in1) & signal(g.in2),
-        .or_op => signal(g.in1) | signal(g.in2),
-        .lshift => signal(g.in1) << @intCast(g.in2),
-        .rshift => signal(g.in1) >> @intCast(g.in2),
+        .wire => signal(cc, g.in1),
+        .not => ~signal(cc, g.in1),
+        .bit => 1 & signal(cc, g.in2),
+        .and_op => signal(cc, g.in1) & signal(cc, g.in2),
+        .or_op => signal(cc, g.in1) | signal(cc, g.in2),
+        .lshift => signal(cc, g.in1) << @intCast(g.in2),
+        .rshift => signal(cc, g.in1) >> @intCast(g.in2),
     };
-    cache[key] = res;
+    cc.cache[key] = res;
     return res;
 }
 
@@ -55,6 +57,8 @@ inline fn parseWire(s: []const u8) u16 {
 
 fn solve(input: []const u8) struct { p1: u16, p2: u16 } {
     @setRuntimeSafety(false);
+    var cc: Circuit = undefined;
+    const circuit = &cc.gates;
     var i: usize = 0;
     while (i < input.len) {
         while (i < input.len and (input[i] == ' ' or input[i] == '\r' or input[i] == '\n')) : (i += 1) {}
@@ -123,12 +127,12 @@ fn solve(input: []const u8) struct { p1: u16, p2: u16 } {
     const a_id = wireId("a");
     const b_id = wireId("b");
 
-    @memset(&cache, 0xFFFF);
-    const p1 = signal(a_id);
+    @memset(&cc.cache, 0xFFFF);
+    const p1 = signal(&cc, a_id);
 
-    @memset(&cache, 0xFFFF);
-    cache[b_id] = p1;
-    const p2 = signal(a_id);
+    @memset(&cc.cache, 0xFFFF);
+    cc.cache[b_id] = p1;
+    const p2 = signal(&cc, a_id);
 
     return .{ .p1 = p1, .p2 = p2 };
 }
